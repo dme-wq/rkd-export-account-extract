@@ -33,7 +33,7 @@ export async function extractDetailsFromSignature(
 
     return {
       companyName,
-      countryCode: '+91',
+      countryCode: '',
       mobileNumber: '',
       secondaryMobileNumber: '',
       designation: '',
@@ -89,11 +89,13 @@ Do not include markdown or backticks, return only raw valid JSON.`;
             if (textResponse) {
               const cleaned = textResponse.replace(/^```json\s*|\s*```$/g, '').trim();
               const parsed = JSON.parse(cleaned);
+              const mobile = parsed.mobileNumber || '';
+              const secondaryMobile = parsed.secondaryMobileNumber || '';
               result = {
                 companyName: parsed.companyName || '',
-                countryCode: parsed.countryCode || '+91',
-                mobileNumber: parsed.mobileNumber || '',
-                secondaryMobileNumber: parsed.secondaryMobileNumber || '',
+                countryCode: (mobile || secondaryMobile) ? (parsed.countryCode || '+91') : '',
+                mobileNumber: mobile,
+                secondaryMobileNumber: secondaryMobile,
                 designation: parsed.designation || '',
                 firstName: parsed.firstName || '',
                 lastName: parsed.lastName || '',
@@ -203,11 +205,14 @@ function parseSignatureHeuristic(text: string): ExtractedSignatureData {
     }
   }
 
+  const primaryMobile = phones[0] || '';
+  const secMobile = phones[1] || '';
+
   return {
     companyName,
-    countryCode,
-    mobileNumber: phones[0] || '',
-    secondaryMobileNumber: phones[1] || '',
+    countryCode: (primaryMobile || secMobile) ? countryCode : '',
+    mobileNumber: primaryMobile,
+    secondaryMobileNumber: secMobile,
     designation,
     firstName,
     lastName,

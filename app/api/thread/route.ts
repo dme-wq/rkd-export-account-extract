@@ -4,6 +4,7 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
 import { getGoogleOAuth2Client } from '@/lib/googleAuth';
 import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
+import { isSenderSignature } from '@/lib/signatureValidator';
 
 export interface ThreadMessage {
   id: string;
@@ -140,7 +141,13 @@ function parseGmailMessage(m: any, userEmail: string): ThreadMessage {
   const fromLower = from.toLowerCase();
   const isFromMe = Boolean(userEmail && fromLower.includes(userEmail));
   const rawBody = extractBodyFromMessage(m);
-  const signature = !isFromMe ? extractSignatureFromReply(rawBody) : undefined;
+  let signature: string | undefined = undefined;
+  if (!isFromMe) {
+    const rawSig = extractSignatureFromReply(rawBody);
+    if (rawSig && !isSenderSignature({ signatureText: rawSig, senderEmail: userEmail })) {
+      signature = rawSig;
+    }
+  }
   const timestamp = parseInt(m.internalDate || String(Date.now()));
 
   return {

@@ -6,6 +6,7 @@ import { getGoogleOAuth2Client } from '@/lib/googleAuth';
 import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
 import { extractDetailsFromSignature } from '@/lib/aiSignatureExtractor';
 import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
+import { isSenderSignature, sanitizeRecipientData } from '@/lib/signatureValidator';
 
 export async function POST(req: NextRequest) {
   try {
@@ -83,64 +84,143 @@ export async function POST(req: NextRequest) {
       const primaryEmail = emailCol.split(/[,;\s]+/)[0].trim().toLowerCase();
       if (!primaryEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(primaryEmail)) continue;
 
+      const userEmail = (session.user?.email || '').toLowerCase().trim();
+      const userName = (session.user?.name || '').trim();
+      const isSelfEmail = primaryEmail === userEmail;
+
       let rowNeedsUpdate = false;
       let newFirstName = existingFirstName;
       let newLastName = existingLastName;
       let newSig = existingSig;
       let newCompany = existingCompany;
-      let newCountryCode = existingCountryCode || '+91';
+      let newCountryCode = existingCountryCode;
       let newMobile = existingMobile;
       let newSecondaryMobile = existingSecondaryMobile;
       let newDesignation = existingDesignation;
 
-      // A. Check for incoming replies from this lead in Gmail
-      try {
-        const incomingRes = await gmail.users.messages.list({
-          userId: 'me',
-          q: `from:${primaryEmail}`,
-          maxResults: 3,
-        });
-
-        const messages = incomingRes.data.messages || [];
-        if (messages.length > 0 && messages[0].id) {
-          const msg = await gmail.users.messages.get({
-            userId: 'me',
-            id: messages[0].id,
-            format: 'full',
-          });
-
-          const bodyText = extractBodyFromMessage(msg.data);
-          const detectedSig = extractSignatureFromReply(bodyText);
-
-          if (detectedSig && detectedSig.trim() && detectedSig !== existingSig) {
-            newSig = detectedSig;
-            rowNeedsUpdate = true;
-
-            const extracted = await extractDetailsFromSignature(detectedSig, primaryEmail);
-            if (extracted.companyName && !newCompany) newCompany = extracted.companyName;
-            if (extracted.countryCode) newCountryCode = extracted.countryCode;
-            if (extracted.mobileNumber && !newMobile) newMobile = extracted.mobileNumber;
-            if (extracted.secondaryMobileNumber && !newSecondaryMobile) newSecondaryMobile = extracted.secondaryMobileNumber;
-            if (extracted.designation && !newDesignation) newDesignation = extracted.designation;
-            if (extracted.firstName && !newFirstName) newFirstName = extracted.firstName;
-            if (extracted.lastName && !newLastName) newLastName = extracted.lastName;
-          }
-        }
-      } catch (err) {
-        console.warn(`Error scanning replies for ${primaryEmail}:`, err);
+      // 1. Cleanse existing row if it erroneously contains the sender's signature or company
+      if (
+        isSenderSignature({ signatureText: existingSig, senderEmail: userEmail, senderName: userName }) ||
+        isSenderSignature({ signatureText: existingCompany, senderEmail: userEmail, senderName: userName }) ||
+        existingCompany.toLowerCase().includes('rkd furnishings') ||
+        existingCompany.toLowerCase().includes('rkd.in') ||
+        existingMobile.includes('9882830548') ||
+        existingMobile.includes('7018218843')
+      ) {
+        newSig = '';
+        newCompany = '';
+        newCountryCode = '';
+        newMobile = '';
+        newSecondaryMobile = '';
+        newDesignation = '';
+        rowNeedsUpdate = true;
       }
 
-      // B. If Company Name is still empty, auto-extract from company email domain
+      // A. Check for incoming replies from this lead in Gmail (Excluding our own sent emails)
+      if (!isSelfEmail) {
+        try {
+          const incomingRes = await gmail.users.messages.list({
+            userId: 'me',
+            q: `from:${primaryEmail} -from:me`,
+            maxResults: 3,
+          });
+
+          const messages = incomingRes.data.messages || [];
+          for (const msgRef of messages) {
+            if (!msgRef.id) continue;
+            const msg = await gmail.users.messages.get({
+              userId: 'me',
+              id: msgRef.id,
+              format: 'full',
+            });
+
+            // Verify from header matches the recipient
+            const headers = msg.data.payload?.headers || [];
+            const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+            if (!fromHeader.toLowerCase().includes(primaryEmail)) {
+              continue;
+            }
+
+            const bodyText = extractBodyFromMessage(msg.data);
+            const detectedSig = extractSignatureFromReply(bodyText);
+
+            // Verify detected signature does NOT belong to the sender
+            if (
+              detectedSig &&
+              detectedSig.trim() &&
+              !isSenderSignature({ signatureText: detectedSig, senderEmail: userEmail, senderName: userName })
+            ) {
+              if (detectedSig !== existingSig) {
+                newSig = detectedSig;
+                rowNeedsUpdate = true;
+
+                const extracted = await extractDetailsFromSignature(detectedSig, primaryEmail);
+                if (extracted.companyName && !newCompany) newCompany = extracted.companyName;
+                if (extracted.countryCode) newCountryCode = extracted.countryCode;
+                if (extracted.mobileNumber && !newMobile) newMobile = extracted.mobileNumber;
+                if (extracted.secondaryMobileNumber && !newSecondaryMobile) newSecondaryMobile = extracted.secondaryMobileNumber;
+                if (extracted.designation && !newDesignation) newDesignation = extracted.designation;
+                if (extracted.firstName && !newFirstName) newFirstName = extracted.firstName;
+                if (extracted.lastName && !newLastName) newLastName = extracted.lastName;
+              }
+              break;
+            }
+          }
+        } catch (err) {
+          console.warn(`Error scanning replies for ${primaryEmail}:`, err);
+        }
+      }
+
+      // B. If Company Name is still empty and it's a corporate email, auto-extract from company email domain
       if (!newCompany || !newCompany.trim()) {
         try {
           const domainRes = await extractCompanyFromEmailDomain(primaryEmail);
-          if (domainRes.companyName) {
+          if (domainRes.companyName && !isSenderSignature({ signatureText: domainRes.companyName, senderEmail: userEmail, senderName: userName })) {
             newCompany = domainRes.companyName;
             rowNeedsUpdate = true;
           }
         } catch {
           // Ignore
         }
+      }
+
+      // Strictly sanitize all data against sender details before updating
+      const sanitized = sanitizeRecipientData(
+        {
+          signature: newSig,
+          companyName: newCompany,
+          countryCode: newCountryCode,
+          mobileNumber: newMobile,
+          secondaryMobileNumber: newSecondaryMobile,
+          designation: newDesignation,
+        },
+        userEmail,
+        userName
+      );
+
+      if (newSig !== (sanitized.signature || '')) {
+        newSig = sanitized.signature || '';
+        rowNeedsUpdate = true;
+      }
+      if (newCompany !== (sanitized.companyName || '')) {
+        newCompany = sanitized.companyName || '';
+        rowNeedsUpdate = true;
+      }
+      if (newCountryCode !== (sanitized.countryCode || '')) {
+        newCountryCode = sanitized.countryCode || '';
+        rowNeedsUpdate = true;
+      }
+      if (newMobile !== (sanitized.mobileNumber || '')) {
+        newMobile = sanitized.mobileNumber || '';
+        rowNeedsUpdate = true;
+      }
+      if (newSecondaryMobile !== (sanitized.secondaryMobileNumber || '')) {
+        newSecondaryMobile = sanitized.secondaryMobileNumber || '';
+        rowNeedsUpdate = true;
+      }
+      if (newDesignation !== (sanitized.designation || '')) {
+        newDesignation = sanitized.designation || '';
+        rowNeedsUpdate = true;
       }
 
       // C. If changes were detected, update the row in Google Sheets

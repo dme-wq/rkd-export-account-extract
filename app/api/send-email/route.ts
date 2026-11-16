@@ -7,6 +7,7 @@ import { extractNameFromEmail } from '@/lib/nameExtractor';
 import { extractDetailsFromSignature, ExtractedSignatureData } from '@/lib/aiSignatureExtractor';
 import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
 import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
+import { isSenderSignature, sanitizeRecipientData } from '@/lib/signatureValidator';
 
 export interface EmailAttachmentPayload {
   filename: string;
@@ -123,11 +124,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1. Recipient Signature & Company Extraction (DO NOT log sender's signature into sheet!)
+    // 1. Recipient Signature & Company Extraction (STRICT: NEVER log sender's signature or details into sheet!)
     let recipientSignature = '';
     let aiExtracted: ExtractedSignatureData = {
       companyName: '',
-      countryCode: '+91',
+      countryCode: '',
       mobileNumber: '',
       secondaryMobileNumber: '',
       designation: '',
@@ -135,33 +136,60 @@ export async function POST(req: NextRequest) {
       lastName: '',
     };
 
-    // Check if recipient has ever sent us an email in Gmail history
-    try {
-      const incomingListRes = await gmail.users.messages.list({
-        userId: 'me',
-        q: `from:${primaryRecipient}`,
-        maxResults: 3,
-      });
+    const userName = (session.user?.name || '').trim();
+    const isSelfEmail = primaryRecipient.toLowerCase().trim() === userEmail.toLowerCase().trim();
 
-      const incomingMessages = incomingListRes.data.messages || [];
-      if (incomingMessages.length > 0 && incomingMessages[0].id) {
-        const fullMsg = await gmail.users.messages.get({
+    // Check if recipient has ever sent us an incoming email in Gmail history
+    // (Excluding messages sent by me, and skipped if self-email!)
+    if (!isSelfEmail) {
+      try {
+        const incomingListRes = await gmail.users.messages.list({
           userId: 'me',
-          id: incomingMessages[0].id,
-          format: 'full',
+          q: `from:${primaryRecipient} -from:me`,
+          maxResults: 3,
         });
-        const bodyText = extractBodyFromMessage(fullMsg.data);
-        const sig = extractSignatureFromReply(bodyText);
-        if (sig && sig.trim()) {
-          recipientSignature = sig;
-          aiExtracted = await extractDetailsFromSignature(sig, primaryRecipient);
+
+        const incomingMessages = incomingListRes.data.messages || [];
+        for (const msgRef of incomingMessages) {
+          if (!msgRef.id) continue;
+          const fullMsg = await gmail.users.messages.get({
+            userId: 'me',
+            id: msgRef.id,
+            format: 'full',
+          });
+
+          // Confirm the message is really from the recipient
+          const headers = fullMsg.data.payload?.headers || [];
+          const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
+          if (!fromHeader.toLowerCase().includes(primaryRecipient.toLowerCase())) {
+            continue;
+          }
+
+          const bodyText = extractBodyFromMessage(fullMsg.data);
+          const sig = extractSignatureFromReply(bodyText);
+
+          // Verify this signature does NOT belong to the sender
+          if (
+            sig &&
+            sig.trim() &&
+            !isSenderSignature({
+              signatureText: sig,
+              senderEmail: userEmail,
+              senderName: userName,
+            })
+          ) {
+            recipientSignature = sig;
+            aiExtracted = await extractDetailsFromSignature(sig, primaryRecipient);
+            break;
+          }
         }
+      } catch (msgErr) {
+        console.warn('Could not check incoming messages for recipient:', msgErr);
       }
-    } catch (msgErr) {
-      console.warn('Could not check incoming messages for recipient:', msgErr);
     }
 
     // If company name not found yet, auto-extract from recipient email domain!
+    // (e.g. lucky.saini@rkdyeing.com -> RK Dyeing, but only for legitimate corporate domains, NOT free providers like gmail.com!)
     if (!aiExtracted.companyName || !aiExtracted.companyName.trim()) {
       try {
         const domainExtract = await extractCompanyFromEmailDomain(primaryRecipient);
@@ -172,6 +200,27 @@ export async function POST(req: NextRequest) {
         console.warn('Domain company extraction notice:', domErr);
       }
     }
+
+    // Strictly sanitize recipient data to prevent ANY sender data leaking to the sheet:
+    const sanitized = sanitizeRecipientData(
+      {
+        signature: recipientSignature,
+        companyName: aiExtracted.companyName,
+        countryCode: aiExtracted.countryCode,
+        mobileNumber: aiExtracted.mobileNumber,
+        secondaryMobileNumber: aiExtracted.secondaryMobileNumber,
+        designation: aiExtracted.designation,
+      },
+      userEmail,
+      userName
+    );
+
+    recipientSignature = sanitized.signature || '';
+    aiExtracted.companyName = sanitized.companyName || '';
+    aiExtracted.countryCode = sanitized.countryCode || '';
+    aiExtracted.mobileNumber = sanitized.mobileNumber || '';
+    aiExtracted.secondaryMobileNumber = sanitized.secondaryMobileNumber || '';
+    aiExtracted.designation = sanitized.designation || '';
 
     // Determine First & Last Name
     let finalFirstName = (firstName || '').trim();
