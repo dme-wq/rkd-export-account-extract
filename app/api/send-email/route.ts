@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
+import { extractDetailsFromSignature } from '@/lib/aiSignatureExtractor';
 
 export async function POST(req: NextRequest) {
   try {
@@ -43,6 +44,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email body is required.' }, { status: 400 });
     }
 
+    // 1. AI Smart Extraction from Signature
+    const rawSignature = signature || '';
+    const aiExtracted = await extractDetailsFromSignature(rawSignature);
+
+    // Determine First & Last Name
+    let finalFirstName = (firstName || '').trim();
+    let finalLastName = (lastName || '').trim();
+
+    // If either First Name or Last Name is missing or looks like an email prefix, query Gmail/People API
+    if ((!finalFirstName || !finalLastName || finalFirstName.toLowerCase() === toList[0].split('@')[0].toLowerCase()) && toList[0]) {
+      const actualGoogleName = await resolveActualGoogleName({
+        gmail: google.gmail({
+          version: 'v1',
+          auth: new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET),
+        }),
+        oauth2Client: new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET),
+        email: toList[0],
+      });
+
+      if (actualGoogleName.firstName) finalFirstName = actualGoogleName.firstName;
+      if (actualGoogleName.lastName) finalLastName = actualGoogleName.lastName;
+    }
+
+    // Fallback if still empty: try AI signature or email parser
+    if (!finalFirstName && !finalLastName) {
+      if (aiExtracted.firstName || aiExtracted.lastName) {
+        finalFirstName = aiExtracted.firstName || '';
+        finalLastName = aiExtracted.lastName || '';
+      } else if (toList[0]) {
+        const extracted = extractNameFromEmail(toList[0]);
+        finalFirstName = extracted.firstName;
+        finalLastName = extracted.lastName;
+      }
+    }
+
     // Setup Google OAuth2 client
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -52,29 +88,6 @@ export async function POST(req: NextRequest) {
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const userEmail = session.user?.email || 'me';
-
-    // Determine First & Last Name
-    let finalFirstName = (firstName || '').trim();
-    let finalLastName = (lastName || '').trim();
-
-    // If either First Name or Last Name is missing or looks like an email prefix, query Gmail/People API for the actual Google Name
-    if ((!finalFirstName || !finalLastName || finalFirstName.toLowerCase() === toList[0].split('@')[0].toLowerCase()) && toList[0]) {
-      const actualGoogleName = await resolveActualGoogleName({
-        gmail,
-        oauth2Client,
-        email: toList[0],
-      });
-
-      if (actualGoogleName.firstName) finalFirstName = actualGoogleName.firstName;
-      if (actualGoogleName.lastName) finalLastName = actualGoogleName.lastName;
-    }
-
-    // Fallback if still empty
-    if (!finalFirstName && !finalLastName && toList[0]) {
-      const extracted = extractNameFromEmail(toList[0]);
-      finalFirstName = extracted.firstName;
-      finalLastName = extracted.lastName;
-    }
 
     // Build raw MIME RFC 2822 email
     const rawEncodedEmail = buildRawEmail({
@@ -86,7 +99,7 @@ export async function POST(req: NextRequest) {
       htmlBody: emailBody,
     });
 
-    // 1. Send the email via Gmail API
+    // 2. Send the email via Gmail API
     let messageId: string | undefined;
     try {
       const sendRes = await gmail.users.messages.send({
@@ -107,7 +120,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Log to Google Sheets (Col A: First Name, Col B: Last Name, Col C: Email, Col D: CC, Col E: BCC, Col F: Signature)
+    // 3. Log to Google Sheets (Col A to K with AI extracted signature fields)
     let sheetsSuccess = false;
     let sheetNote = '';
 
@@ -119,7 +132,12 @@ export async function POST(req: NextRequest) {
         emailTo: toList.join(', '),
         ccEmails: ccList.join(', '),
         bccEmails: bccList.join(', '),
-        signature: signature || '',
+        signature: rawSignature,
+        companyName: aiExtracted.companyName,
+        countryCode: aiExtracted.countryCode,
+        mobileNumber: aiExtracted.mobileNumber,
+        secondaryMobileNumber: aiExtracted.secondaryMobileNumber,
+        designation: aiExtracted.designation,
       });
       sheetsSuccess = true;
     } catch (sheetErr: unknown) {
@@ -133,13 +151,18 @@ export async function POST(req: NextRequest) {
       messageId,
       emailSent: true,
       sheetsLogged: sheetsSuccess,
-      message: sheetNote || 'Email sent and logged to Google Sheets successfully!',
+      message: sheetNote || 'Email sent and all details logged to Google Sheets with AI Smart Extraction!',
       lead: {
         firstName: finalFirstName,
         lastName: finalLastName,
         emailTo: toList.join(', '),
         ccEmails: ccList.join(', '),
         bccEmails: bccList.join(', '),
+        companyName: aiExtracted.companyName,
+        countryCode: aiExtracted.countryCode,
+        mobileNumber: aiExtracted.mobileNumber,
+        secondaryMobileNumber: aiExtracted.secondaryMobileNumber,
+        designation: aiExtracted.designation,
       },
     });
   } catch (error: unknown) {
@@ -161,7 +184,6 @@ async function resolveActualGoogleName({
 }): Promise<{ firstName: string; lastName: string }> {
   const targetEmail = email.trim().toLowerCase();
 
-  // 1. Search Gmail messages for any headers with this email
   try {
     const listRes = await gmail.users.messages.list({
       userId: 'me',
@@ -183,7 +205,6 @@ async function resolveActualGoogleName({
       for (const h of headers) {
         const val = h.value || '';
         if (val.toLowerCase().includes(targetEmail)) {
-          // Parse: "Lucky Saini <luckyknhn@gmail.com>"
           const match = val.match(/(.*?)\s*<([^\s>]+)>/);
           if (match) {
             const rawName = match[1].replace(/["']/g, '').trim();
@@ -204,36 +225,6 @@ async function resolveActualGoogleName({
     console.warn('Gmail name lookup in send-email error:', err);
   }
 
-  // 2. Try Google People API (otherContacts)
-  try {
-    const people = google.people({ version: 'v1', auth: oauth2Client });
-    const otherRes = await people.otherContacts.search({
-      query: targetEmail,
-      readMask: 'names,emailAddresses',
-    });
-
-    const results = otherRes.data.results || [];
-    if (results.length > 0 && results[0].person?.names) {
-      const nameObj = results[0].person.names[0];
-      const given = nameObj.givenName || '';
-      const family = nameObj.familyName || '';
-      const display = nameObj.displayName || '';
-
-      if (given || family) {
-        return { firstName: given, lastName: family };
-      } else if (display) {
-        const parts = display.split(/\s+/).filter(Boolean);
-        return {
-          firstName: parts[0] || '',
-          lastName: parts.slice(1).join(' ') || '',
-        };
-      }
-    }
-  } catch (peopleErr) {
-    console.warn('People lookup in send-email error:', peopleErr);
-  }
-
-  // Fallback
   return { firstName: '', lastName: '' };
 }
 
@@ -313,6 +304,11 @@ async function logToSheets({
   ccEmails,
   bccEmails,
   signature,
+  companyName,
+  countryCode,
+  mobileNumber,
+  secondaryMobileNumber,
+  designation,
 }: {
   oauth2Client: InstanceType<typeof google.auth.OAuth2>;
   firstName: string;
@@ -321,6 +317,11 @@ async function logToSheets({
   ccEmails: string;
   bccEmails: string;
   signature: string;
+  companyName: string;
+  countryCode: string;
+  mobileNumber: string;
+  secondaryMobileNumber: string;
+  designation: string;
 }) {
   const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
   const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
@@ -342,22 +343,34 @@ async function logToSheets({
     console.warn('Could not inspect sheet metadata, falling back to Gmail:', err);
   }
 
-  // Ensure header row exists
+  // Ensure header row exists up to Column K
   try {
     const headerCheck = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${targetSheet}!A1:F1`,
+      range: `${targetSheet}!A1:K1`,
     });
 
     const headerValues = headerCheck.data.values?.[0];
-    if (!headerValues || headerValues.length === 0) {
+    if (!headerValues || headerValues.length < 11) {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `${targetSheet}!A1:F1`,
+        range: `${targetSheet}!A1:K1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [
-            ['First Name', 'Last Name', 'Email ID', 'CC Email ID', 'BCC Email ID', 'Signature'],
+            [
+              'First Name',
+              'Last Name',
+              'Email ID',
+              'CC Email ID',
+              'BCC Email ID',
+              'Signature',
+              'Company Name',
+              'Country Code',
+              'Mobile Number',
+              'Secondary Mobile Number',
+              'Designation',
+            ],
           ],
         },
       });
@@ -366,10 +379,10 @@ async function logToSheets({
     console.warn('Header ensure notice:', hErr);
   }
 
-  // Append data row
+  // Append data row (Col A to K)
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${targetSheet}!A:F`,
+    range: `${targetSheet}!A:K`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: {
@@ -380,6 +393,11 @@ async function logToSheets({
         ccEmails || '',
         bccEmails || '',
         signature || '',
+        companyName || '',
+        countryCode || '',
+        mobileNumber || '',
+        secondaryMobileNumber || '',
+        designation || '',
       ]],
     },
   });

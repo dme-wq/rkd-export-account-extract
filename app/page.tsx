@@ -24,6 +24,11 @@ export type SentRecord = {
   ccEmails: string;
   bccEmails: string;
   signature: string;
+  companyName?: string;
+  countryCode?: string;
+  mobileNumber?: string;
+  secondaryMobileNumber?: string;
+  designation?: string;
 };
 
 export default function Home() {
@@ -67,7 +72,7 @@ export default function Home() {
   }, [session, fetchRecords]);
 
   const handleEmailSent = useCallback(() => {
-    addToast('Message sent and lead saved to Google Sheet!', 'success');
+    addToast('Message sent! AI extracted contact details and logged to Google Sheets.', 'success');
     fetchRecords();
   }, [addToast, fetchRecords]);
 

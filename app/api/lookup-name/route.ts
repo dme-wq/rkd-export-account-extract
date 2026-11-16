@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
         if (!resolvedName.firstName && !resolvedName.lastName) {
           try {
             const people = google.people({ version: 'v1', auth: oauth2Client });
-            
+
             // Search otherContacts
             const otherRes = await people.otherContacts.search({
               query: email,
@@ -165,3 +165,4 @@ function parseHeaderDisplayName(headerVal: string, targetEmail: string): { first
 
   return { firstName: '', lastName: '' };
 }
+

@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Gmail!A:G',
+      range: 'Gmail!A:K',
     });
 
     const rows = response.data.values || [];
@@ -48,6 +48,11 @@ export async function GET(req: NextRequest) {
       ccEmails: row[3] || '',
       bccEmails: row[4] || '',
       signature: row[5] || '',
+      companyName: row[6] || '',
+      countryCode: row[7] || '',
+      mobileNumber: row[8] || '',
+      secondaryMobileNumber: row[9] || '',
+      designation: row[10] || '',
     }));
 
     return NextResponse.json({
@@ -63,4 +68,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: errMessage }, { status: 500 });
   }
 }
-

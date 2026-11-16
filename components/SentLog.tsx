@@ -1,7 +1,7 @@
 'use client';
 
 import { SentRecord } from '@/app/page';
-import { RefreshCw, ExternalLink, Search, Mail, ChevronLeft, ChevronRight, CheckCircle2, Copy, Check } from 'lucide-react';
+import { RefreshCw, ExternalLink, Search, Mail, ChevronLeft, ChevronRight, CheckCircle2, Copy, Check, Sparkles, Phone, Building2 } from 'lucide-react';
 import { useState } from 'react';
 import { clsx } from 'clsx';
 
@@ -25,7 +25,10 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
       r.firstName.toLowerCase().includes(q) ||
       r.lastName.toLowerCase().includes(q) ||
       r.emailTo.toLowerCase().includes(q) ||
-      r.ccEmails.toLowerCase().includes(q)
+      r.ccEmails.toLowerCase().includes(q) ||
+      (r.companyName && r.companyName.toLowerCase().includes(q)) ||
+      (r.designation && r.designation.toLowerCase().includes(q)) ||
+      (r.mobileNumber && r.mobileNumber.includes(q))
     );
   });
 
@@ -40,7 +43,7 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
 
   return (
     <div className="bg-white rounded-[20px] border border-[#e0e2e6] shadow-xs overflow-hidden flex flex-col h-full">
-      {/* Top Bar: Title, Live Status & Sheets Link */}
+      {/* Top Bar */}
       <div className="p-4 sm:p-5 border-b border-[#e0e2e6] flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full bg-[#c2e7ff]/60 text-[#001d35] flex items-center justify-center">
@@ -49,12 +52,13 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-[#1f1f1f]">Sent & Extracted Leads</h2>
-              <span className="bg-[#eaf1fb] text-[#0b57d0] text-xs font-semibold px-2.5 py-0.5 rounded-full">
-                {records.length} Extracted
+              <span className="bg-[#eaf1fb] text-[#0b57d0] text-xs font-semibold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <Sparkles size={11} />
+                <span>{records.length} AI Extracted</span>
               </span>
             </div>
             <p className="text-xs text-[#747775] mt-0.5">
-              Live Google Sheets synchronization • Tab: <strong>Gmail</strong>
+              Live Google Sheets synchronization • Tab: <strong>Gmail</strong> (Cols A to K)
             </p>
           </div>
         </div>
@@ -97,13 +101,13 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
               setSearch(e.target.value);
               setCurrentPage(1);
             }}
-            placeholder="Search leads by name or email..."
+            placeholder="Search by name, company, email or phone..."
             className="w-full bg-transparent text-xs text-[#1f1f1f] outline-none placeholder-[#747775]"
           />
         </div>
 
-        <span className="text-[11px] text-[#747775] hidden sm:block">
-          Matching Sheet Columns: A (First), B (Last), C (Email), D (CC), E (BCC), F (Signature)
+        <span className="text-[11px] text-[#747775] hidden lg:block">
+          Columns: A (First), B (Last), C (Email), D (CC), G (Company), H (Code), I (Mobile), J (2nd Mobile), K (Designation)
         </span>
       </div>
 
@@ -121,7 +125,7 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
             </div>
             <p className="text-sm font-medium text-[#1f1f1f]">No emails sent yet</p>
             <p className="text-xs text-[#747775] max-w-sm mt-1">
-              Click &quot;Compose&quot; to send an email. The recipient details, CC, BCC, and signature will automatically log here!
+              Click &quot;Compose&quot; to send an email. Recipient names and AI signature details (Company, Designation, Mobile) will automatically log here!
             </p>
             <button
               type="button"
@@ -135,14 +139,16 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-[#f6f8fc] border-b border-[#e0e2e6] text-[#444746] font-medium">
-                <th className="py-2.5 px-4 w-12 text-center">#</th>
-                <th className="py-2.5 px-4">First Name</th>
-                <th className="py-2.5 px-4">Last Name</th>
-                <th className="py-2.5 px-4">Email ID (To)</th>
-                <th className="py-2.5 px-4">CC</th>
-                <th className="py-2.5 px-4">BCC</th>
-                <th className="py-2.5 px-4">Signature</th>
-                <th className="py-2.5 px-4 text-center">Action</th>
+                <th className="py-2.5 px-3 w-10 text-center">#</th>
+                <th className="py-2.5 px-3">First Name (A)</th>
+                <th className="py-2.5 px-3">Last Name (B)</th>
+                <th className="py-2.5 px-3">Email ID (C)</th>
+                <th className="py-2.5 px-3">CC Email (D)</th>
+                <th className="py-2.5 px-3">Company Name (G)</th>
+                <th className="py-2.5 px-3">Designation (K)</th>
+                <th className="py-2.5 px-3">Mobile (I)</th>
+                <th className="py-2.5 px-3">2nd Mobile (J)</th>
+                <th className="py-2.5 px-3 text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f1f3f4]">
@@ -151,37 +157,50 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
                   key={rec.id}
                   className="hover:bg-[#f8fafd] transition-colors group"
                 >
-                  <td className="py-3 px-4 text-center text-[#747775] font-mono text-[11px]">
+                  <td className="py-3 px-3 text-center text-[#747775] font-mono text-[11px]">
                     {(currentPage - 1) * pageSize + i + 1}
                   </td>
-                  <td className="py-3 px-4 font-semibold text-[#1f1f1f]">
+                  <td className="py-3 px-3 font-semibold text-[#1f1f1f]">
                     {rec.firstName || <span className="text-[#c4c7cc] italic">—</span>}
                   </td>
-                  <td className="py-3 px-4 text-[#1f1f1f]">
+                  <td className="py-3 px-3 text-[#1f1f1f]">
                     {rec.lastName || <span className="text-[#c4c7cc] italic">—</span>}
                   </td>
-                  <td className="py-3 px-4">
+                  <td className="py-3 px-3">
                     <span className="text-[#0b57d0] font-medium hover:underline cursor-pointer">
                       {rec.emailTo}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-[#444746] max-w-[140px] truncate" title={rec.ccEmails}>
+                  <td className="py-3 px-3 text-[#444746] max-w-[120px] truncate" title={rec.ccEmails}>
                     {rec.ccEmails || <span className="text-[#c4c7cc] italic">—</span>}
                   </td>
-                  <td className="py-3 px-4 text-[#444746] max-w-[140px] truncate" title={rec.bccEmails}>
-                    {rec.bccEmails || <span className="text-[#c4c7cc] italic">—</span>}
-                  </td>
-                  <td className="py-3 px-4 text-[#747775] max-w-[180px] truncate" title={rec.signature}>
-                    {rec.signature ? (
-                      <span className="inline-flex items-center gap-1 text-[#1e8e3e]">
-                        <CheckCircle2 size={12} />
-                        <span className="truncate">{rec.signature}</span>
+                  <td className="py-3 px-3 font-medium text-[#1f1f1f]">
+                    {rec.companyName ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Building2 size={12} className="text-[#0b57d0] flex-shrink-0" />
+                        <span className="truncate max-w-[130px]">{rec.companyName}</span>
                       </span>
                     ) : (
                       <span className="text-[#c4c7cc] italic">—</span>
                     )}
                   </td>
-                  <td className="py-3 px-4 text-center">
+                  <td className="py-3 px-3 text-[#444746] max-w-[120px] truncate">
+                    {rec.designation || <span className="text-[#c4c7cc] italic">—</span>}
+                  </td>
+                  <td className="py-3 px-3 text-[#1e8e3e] font-mono text-[11px] whitespace-nowrap">
+                    {rec.mobileNumber ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Phone size={11} />
+                        <span>{rec.countryCode ? `${rec.countryCode} ` : ''}{rec.mobileNumber}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[#c4c7cc] italic">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 text-[#747775] font-mono text-[11px] whitespace-nowrap">
+                    {rec.secondaryMobileNumber || <span className="text-[#c4c7cc] italic">—</span>}
+                  </td>
+                  <td className="py-3 px-3 text-center">
                     <button
                       type="button"
                       onClick={() => copyEmail(rec.emailTo, rec.id)}
