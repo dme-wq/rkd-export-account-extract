@@ -207,3 +207,4 @@ export function SentLog({ records, loading, onRefresh }: SentLogProps) {
     </div>
   );
 }
+

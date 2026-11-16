@@ -127,3 +127,4 @@ export function Header({ session, onMenuClick, onSignOut }: HeaderProps) {
     </header>
   );
 }
+

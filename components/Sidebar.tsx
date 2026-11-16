@@ -127,3 +127,4 @@ function NavItem({ icon, label, active, onClick, badge }: NavItemProps) {
     </button>
   );
 }
+

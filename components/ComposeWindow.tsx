@@ -569,3 +569,4 @@ export function ComposeWindow({ session, onSent, onError }: ComposeWindowProps) 
     </div>
   );
 }
+

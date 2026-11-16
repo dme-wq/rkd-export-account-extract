@@ -40,3 +40,4 @@ export function Toast({ message, type, onDismiss }: ToastProps) {
     </div>
   );
 }
+
