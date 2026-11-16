@@ -16,7 +16,45 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [isSyncingReplies, setIsSyncingReplies] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const pageSize = 12;
+
+  const handleSyncReplies = async () => {
+    setIsSyncingReplies(true);
+    setSyncStatus({ message: 'Scanning Gmail for incoming replies and extracting signatures...', type: 'info' });
+    try {
+      const res = await fetch('/api/sync-replies', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.updatedCount > 0) {
+          setSyncStatus({
+            message: `🎉 Success! Found replies from leads and updated ${data.updatedCount} rows in Google Sheet with new signatures & company details!`,
+            type: 'success',
+          });
+        } else {
+          setSyncStatus({
+            message: `✓ Scan complete (${data.totalScanned} leads checked). All company names and signatures are up to date!`,
+            type: 'info',
+          });
+        }
+        onRefresh();
+      } else {
+        setSyncStatus({
+          message: data.error || 'Failed to sync replies from Gmail.',
+          type: 'error',
+        });
+      }
+    } catch (err) {
+      setSyncStatus({
+        message: 'Could not connect to Gmail sync service.',
+        type: 'error',
+      });
+    } finally {
+      setIsSyncingReplies(false);
+      setTimeout(() => setSyncStatus(null), 6000);
+    }
+  };
 
   const filtered = records.filter((r) => {
     const q = search.toLowerCase();
@@ -65,11 +103,23 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          {/* Sync Replies & Signatures */}
+          <button
+            type="button"
+            onClick={handleSyncReplies}
+            disabled={isSyncingReplies || loading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-[#001d35] bg-[#c2e7ff] hover:bg-[#b3dbf7] rounded-full shadow-2xs transition-colors disabled:opacity-50"
+            title="Scan Gmail for replies from leads, extract signatures and update Google Sheet"
+          >
+            <Sparkles size={13} className={clsx(isSyncingReplies && 'animate-spin text-[#0b57d0]')} />
+            <span>{isSyncingReplies ? 'Syncing Replies...' : 'Sync Replies & Details'}</span>
+          </button>
+
           {/* Refresh */}
           <button
             type="button"
             onClick={onRefresh}
-            disabled={loading}
+            disabled={loading || isSyncingReplies}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[#444746] hover:bg-[#f1f3f4] rounded-full border border-[#dadce0] transition-colors disabled:opacity-50"
             title="Refresh Leads"
           >
@@ -89,6 +139,31 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
           </a>
         </div>
       </div>
+
+      {/* Sync Status Banner */}
+      {syncStatus && (
+        <div
+          className={clsx(
+            'px-4 py-2.5 text-xs font-medium flex items-center justify-between border-b transition-all',
+            syncStatus.type === 'success' && 'bg-[#e6f4ea] text-[#137333] border-[#ceead6]',
+            syncStatus.type === 'error' && 'bg-[#fce8e6] text-[#c5221f] border-[#fad2cf]',
+            syncStatus.type === 'info' && 'bg-[#e8f0fe] text-[#1967d2] border-[#d2e3fc]'
+          )}
+        >
+          <div className="flex items-center gap-2">
+            {syncStatus.type === 'info' && <RefreshCw size={14} className="animate-spin flex-shrink-0" />}
+            {syncStatus.type === 'success' && <CheckCircle2 size={14} className="flex-shrink-0" />}
+            <span>{syncStatus.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSyncStatus(null)}
+            className="text-xs hover:opacity-75 font-bold ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Search Bar */}
       <div className="px-4 py-2.5 bg-[#f8fafd] border-b border-[#e0e2e6] flex items-center justify-between gap-3">

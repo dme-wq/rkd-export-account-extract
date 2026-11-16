@@ -7,7 +7,7 @@ import {
   Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
   Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
-  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe
+  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
@@ -49,6 +49,7 @@ export function ComposeWindow({
   const [subject, setSubject] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [detectedCompany, setDetectedCompany] = useState('');
   const [isLookingUpName, setIsLookingUpName] = useState(false);
   const [nameSource, setNameSource] = useState<string | null>(null);
   const [hasManuallyEditedName, setHasManuallyEditedName] = useState(false);
@@ -95,10 +96,15 @@ export function ComposeWindow({
       const res = await fetch(`/api/lookup-name?email=${encodeURIComponent(email)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.success && (data.firstName || data.lastName)) {
-          setFirstName(data.firstName || '');
-          setLastName(data.lastName || '');
-          setNameSource(data.source);
+        if (data.success) {
+          if (data.firstName || data.lastName) {
+            setFirstName(data.firstName || '');
+            setLastName(data.lastName || '');
+            setNameSource(data.source);
+          }
+          if (data.companyName) {
+            setDetectedCompany(data.companyName);
+          }
         }
       }
     } catch (err) {
@@ -604,6 +610,12 @@ export function ComposeWindow({
               </div>
 
               <div className="flex items-center gap-2">
+                {detectedCompany && (
+                  <span className="text-[11px] text-[#1e40af] bg-[#eff6ff] border border-[#bfdbfe] px-2.5 py-0.5 rounded-full font-medium flex items-center gap-1 shadow-2xs">
+                    <Building2 size={11} className="text-[#2563eb]" />
+                    <span>Company: <strong>{detectedCompany}</strong></span>
+                  </span>
+                )}
                 {nameSource === 'gmail-history' && (
                   <span className="text-[11px] text-[#137333] bg-[#e6f4ea] px-2 py-0.5 rounded-full font-medium">
                     ✓ Verified Google Profile
@@ -1058,6 +1070,7 @@ export function ComposeWindow({
                   setSubject('');
                   setFirstName('');
                   setLastName('');
+                  setDetectedCompany('');
                   setAttachments([]);
                   if (bodyRef.current) bodyRef.current.innerHTML = '';
                   setIsDiscardModalOpen(false);

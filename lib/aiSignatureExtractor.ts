@@ -1,4 +1,7 @@
 // AI Smart Signature Extractor using Gemini API + Intelligent Fallback Parser
+// Includes corporate domain research integration
+
+import { extractCompanyFromEmailDomain } from './companyExtractor';
 
 export interface ExtractedSignatureData {
   companyName: string;
@@ -10,16 +13,34 @@ export interface ExtractedSignatureData {
   lastName?: string;
 }
 
-export async function extractDetailsFromSignature(signatureText: string): Promise<ExtractedSignatureData> {
+export async function extractDetailsFromSignature(
+  signatureText: string,
+  fallbackEmail?: string
+): Promise<ExtractedSignatureData> {
+  // If signature is empty, try extracting company name from recipient email domain
   if (!signatureText || !signatureText.trim()) {
+    let companyName = '';
+    if (fallbackEmail) {
+      try {
+        const domainResult = await extractCompanyFromEmailDomain(fallbackEmail);
+        if (domainResult.companyName) {
+          companyName = domainResult.companyName;
+        }
+      } catch (err) {
+        console.warn('Fallback domain company extract error:', err);
+      }
+    }
+
     return {
-      companyName: '',
-      countryCode: '',
+      companyName,
+      countryCode: '+91',
       mobileNumber: '',
       secondaryMobileNumber: '',
       designation: '',
     };
   }
+
+  let result: ExtractedSignatureData | null = null;
 
   // 1. Try Gemini API if GEMINI_API_KEY is configured in Environment Variables
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -68,7 +89,7 @@ Do not include markdown or backticks, return only raw valid JSON.`;
             if (textResponse) {
               const cleaned = textResponse.replace(/^```json\s*|\s*```$/g, '').trim();
               const parsed = JSON.parse(cleaned);
-              return {
+              result = {
                 companyName: parsed.companyName || '',
                 countryCode: parsed.countryCode || '+91',
                 mobileNumber: parsed.mobileNumber || '',
@@ -77,6 +98,7 @@ Do not include markdown or backticks, return only raw valid JSON.`;
                 firstName: parsed.firstName || '',
                 lastName: parsed.lastName || '',
               };
+              break;
             }
           }
         } catch {
@@ -89,7 +111,23 @@ Do not include markdown or backticks, return only raw valid JSON.`;
   }
 
   // 2. Intelligent Rule-based NLP Parser (Instant, 100% Reliable & Zero Quota/Billing Dependencies)
-  return parseSignatureHeuristic(signatureText);
+  if (!result) {
+    result = parseSignatureHeuristic(signatureText);
+  }
+
+  // 3. Fallback: If companyName is still empty, extract from recipient email domain!
+  if ((!result.companyName || !result.companyName.trim()) && fallbackEmail) {
+    try {
+      const domainResult = await extractCompanyFromEmailDomain(fallbackEmail);
+      if (domainResult.companyName) {
+        result.companyName = domainResult.companyName;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  return result;
 }
 
 function parseSignatureHeuristic(text: string): ExtractedSignatureData {
@@ -120,7 +158,11 @@ function parseSignatureHeuristic(text: string): ExtractedSignatureData {
   // Extract Company Name
   let companyName = '';
   for (const line of lines) {
-    if (/(pvt\s*ltd|ltd|limited|inc|corp|enterprises|furnishings|technologies|solutions|group|industries|private\s*limited|co\.)/i.test(line)) {
+    if (
+      /(pvt\s*ltd|ltd|limited|inc|corp|enterprises|furnishings|technologies|solutions|group|industries|private\s*limited|co\.|exports|textiles|mills)/i.test(
+        line
+      )
+    ) {
       if (line.includes('|')) {
         const parts = line.split('|');
         companyName = parts[parts.length - 1].trim();
@@ -135,7 +177,9 @@ function parseSignatureHeuristic(text: string): ExtractedSignatureData {
   let designation = '';
   for (const line of lines) {
     if (
-      /(expert|manager|executive|director|lead|developer|engineer|officer|specialist|consultant|founder|ceo|cto|cfo|head|partner|designer|analyst|associate|supervisor)/i.test(line) &&
+      /(expert|manager|executive|director|lead|developer|engineer|officer|specialist|consultant|founder|ceo|cto|cfo|head|partner|designer|analyst|associate|supervisor)/i.test(
+        line
+      ) &&
       !/(pvt|ltd|limited|inc|corp|furnishings)/i.test(line)
     ) {
       designation = line.trim();

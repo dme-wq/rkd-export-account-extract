@@ -3,7 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
-import { extractDetailsFromSignature } from '@/lib/aiSignatureExtractor';
+import { extractDetailsFromSignature, ExtractedSignatureData } from '@/lib/aiSignatureExtractor';
+import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
+import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
 
 export interface EmailAttachmentPayload {
   filename: string;
@@ -29,7 +31,6 @@ export async function POST(req: NextRequest) {
       bcc,
       subject,
       body: emailBody,
-      signature,
       firstName,
       lastName,
       attachments = [],
@@ -52,23 +53,76 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email body is required.' }, { status: 400 });
     }
 
-    // 1. AI Smart Extraction from Signature
-    const rawSignature = signature || '';
-    const aiExtracted = await extractDetailsFromSignature(rawSignature);
+    // Initialize authenticated Google clients
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ access_token: session.accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const userEmail = session.user?.email || 'me';
+    const primaryRecipient = toList[0];
+
+    // 1. Recipient Signature & Company Extraction (DO NOT log sender's signature into sheet!)
+    let recipientSignature = '';
+    let aiExtracted: ExtractedSignatureData = {
+      companyName: '',
+      countryCode: '+91',
+      mobileNumber: '',
+      secondaryMobileNumber: '',
+      designation: '',
+      firstName: '',
+      lastName: '',
+    };
+
+    // Check if recipient has ever sent us an email in Gmail history
+    try {
+      const incomingListRes = await gmail.users.messages.list({
+        userId: 'me',
+        q: `from:${primaryRecipient}`,
+        maxResults: 3,
+      });
+
+      const incomingMessages = incomingListRes.data.messages || [];
+      if (incomingMessages.length > 0 && incomingMessages[0].id) {
+        const fullMsg = await gmail.users.messages.get({
+          userId: 'me',
+          id: incomingMessages[0].id,
+          format: 'full',
+        });
+        const bodyText = extractBodyFromMessage(fullMsg.data);
+        const sig = extractSignatureFromReply(bodyText);
+        if (sig && sig.trim()) {
+          recipientSignature = sig;
+          aiExtracted = await extractDetailsFromSignature(sig, primaryRecipient);
+        }
+      }
+    } catch (msgErr) {
+      console.warn('Could not check incoming messages for recipient:', msgErr);
+    }
+
+    // If company name not found yet, auto-extract from recipient email domain!
+    if (!aiExtracted.companyName || !aiExtracted.companyName.trim()) {
+      try {
+        const domainExtract = await extractCompanyFromEmailDomain(primaryRecipient);
+        if (domainExtract.companyName) {
+          aiExtracted.companyName = domainExtract.companyName;
+        }
+      } catch (domErr) {
+        console.warn('Domain company extraction notice:', domErr);
+      }
+    }
 
     // Determine First & Last Name
     let finalFirstName = (firstName || '').trim();
     let finalLastName = (lastName || '').trim();
 
-    // If either First Name or Last Name is missing or looks like an email prefix, query Gmail/People API
-    if ((!finalFirstName || !finalLastName || finalFirstName.toLowerCase() === toList[0].split('@')[0].toLowerCase()) && toList[0]) {
+    // Query Gmail/People API if name is missing
+    if (!finalFirstName || !finalLastName || finalFirstName.toLowerCase() === primaryRecipient.split('@')[0].toLowerCase()) {
       const actualGoogleName = await resolveActualGoogleName({
-        gmail: google.gmail({
-          version: 'v1',
-          auth: new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET),
-        }),
-        oauth2Client: new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET),
-        email: toList[0],
+        gmail,
+        oauth2Client,
+        email: primaryRecipient,
       });
 
       if (actualGoogleName.firstName) finalFirstName = actualGoogleName.firstName;
@@ -80,22 +134,12 @@ export async function POST(req: NextRequest) {
       if (aiExtracted.firstName || aiExtracted.lastName) {
         finalFirstName = aiExtracted.firstName || '';
         finalLastName = aiExtracted.lastName || '';
-      } else if (toList[0]) {
-        const extracted = extractNameFromEmail(toList[0]);
+      } else {
+        const extracted = extractNameFromEmail(primaryRecipient);
         finalFirstName = extracted.firstName;
         finalLastName = extracted.lastName;
       }
     }
-
-    // Setup Google OAuth2 client
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
-    );
-    oauth2Client.setCredentials({ access_token: session.accessToken });
-
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    const userEmail = session.user?.email || 'me';
 
     // Build raw MIME RFC 2822 email with optional attachments
     const rawEncodedEmail = buildRawEmailWithAttachments({
@@ -141,7 +185,7 @@ export async function POST(req: NextRequest) {
         emailTo: toList.join(', '),
         ccEmails: ccList.join(', '),
         bccEmails: bccList.join(', '),
-        signature: rawSignature,
+        signature: recipientSignature,
         companyName: aiExtracted.companyName,
         countryCode: aiExtracted.countryCode,
         mobileNumber: aiExtracted.mobileNumber,
@@ -160,7 +204,7 @@ export async function POST(req: NextRequest) {
       messageId,
       emailSent: true,
       sheetsLogged: sheetsSuccess,
-      message: sheetNote || 'Email sent and all details logged to Google Sheets with AI Smart Extraction!',
+      message: sheetNote || 'Email sent and recipient details logged to Google Sheets with AI Smart Extraction!',
       lead: {
         firstName: finalFirstName,
         lastName: finalLastName,

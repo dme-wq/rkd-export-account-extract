@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
+import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
 
 export async function GET(req: NextRequest) {
   try {
@@ -125,6 +126,18 @@ export async function GET(req: NextRequest) {
       };
     }
 
+    // 4. Extract Corporate Company Name from Email Domain
+    let companyInfo = {
+      isCompanyEmail: false,
+      companyName: '',
+      domain: '',
+    };
+    try {
+      companyInfo = await extractCompanyFromEmailDomain(email);
+    } catch (compErr) {
+      console.warn('Company lookup error:', compErr);
+    }
+
     return NextResponse.json({
       success: true,
       email,
@@ -132,6 +145,9 @@ export async function GET(req: NextRequest) {
       lastName: resolvedName.lastName,
       displayName: `${resolvedName.firstName} ${resolvedName.lastName}`.trim(),
       source: resolvedName.source,
+      isCompanyEmail: companyInfo.isCompanyEmail,
+      companyName: companyInfo.companyName,
+      domain: companyInfo.domain,
     });
   } catch (error: unknown) {
     console.error('Lookup name error:', error);
