@@ -1,122 +1,32 @@
 'use client';
 
 import { Session } from 'next-auth';
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, ChevronDown, X, Paperclip, Smile, Image, Link2, Trash2, Maximize2, Minus } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import {
+  Send, ChevronDown, X, Minus, Maximize2, Minimize2,
+  Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
+  Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
+  AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
+  Sparkles, Check
+} from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface ComposeWindowProps {
   session: Session;
   onSent: () => void;
   onError: (msg: string) => void;
+  onClose?: () => void;
+  isFloating?: boolean;
 }
 
-interface EmailChipProps {
-  email: string;
-  onRemove: () => void;
-}
-
-function EmailChip({ email, onRemove }: EmailChipProps) {
-  return (
-    <span className="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full px-2.5 py-0.5 text-xs font-medium max-w-[180px] group transition-colors">
-      <span className="truncate">{email}</span>
-      <button
-        onClick={onRemove}
-        className="flex-shrink-0 text-gray-400 hover:text-gray-700 ml-0.5"
-        type="button"
-      >
-        <X size={12} />
-      </button>
-    </span>
-  );
-}
-
-interface EmailInputProps {
-  label: string;
-  chips: string[];
-  onAdd: (email: string) => void;
-  onRemove: (index: number) => void;
-  inputValue: string;
-  onInputChange: (val: string) => void;
-  placeholder?: string;
-}
-
-function EmailInput({ label, chips, onAdd, onRemove, inputValue, onInputChange, placeholder }: EmailInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if ((e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') && inputValue.trim()) {
-      e.preventDefault();
-      const email = inputValue.trim().replace(/,$/, '');
-      if (email && isValidEmail(email)) {
-        onAdd(email);
-        onInputChange('');
-      }
-    } else if (e.key === 'Backspace' && !inputValue && chips.length > 0) {
-      onRemove(chips.length - 1);
-    }
-  };
-
-  const handleBlur = () => {
-    if (inputValue.trim() && isValidEmail(inputValue.trim())) {
-      onAdd(inputValue.trim());
-      onInputChange('');
-    }
-  };
-
-  return (
-    <div
-      className="flex items-center gap-2 px-4 py-1.5 border-b border-gray-200 min-h-[44px] flex-wrap cursor-text hover:bg-gray-50/50 transition-colors"
-      onClick={() => inputRef.current?.focus()}
-    >
-      <span className="text-sm text-gray-500 font-medium flex-shrink-0 w-5">{label}</span>
-      <div className="flex flex-wrap gap-1 flex-1 items-center min-h-[32px]">
-        {chips.map((email, i) => (
-          <EmailChip key={i} email={email} onRemove={() => onRemove(i)} />
-        ))}
-        <input
-          ref={inputRef}
-          type="text"
-          value={inputValue}
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder={chips.length === 0 ? (placeholder || '') : ''}
-          className="flex-1 min-w-[120px] border-none outline-none text-sm text-gray-800 bg-transparent placeholder-gray-400 py-1"
-        />
-      </div>
-    </div>
-  );
-}
-
-function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-type ToolbarButtonProps = {
-  onClick: () => void;
-  title: string;
-  active?: boolean;
-  children: React.ReactNode;
-};
-
-function ToolbarBtn({ onClick, title, active, children }: ToolbarButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={clsx(
-        'p-1.5 rounded hover:bg-gray-200 transition-colors text-gray-600',
-        active && 'bg-gray-200 text-gray-900'
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function ComposeWindow({ session, onSent, onError }: ComposeWindowProps) {
+export function ComposeWindow({
+  session,
+  onSent,
+  onError,
+  onClose,
+  isFloating = false,
+}: ComposeWindowProps) {
+  // Recipients
   const [toChips, setToChips] = useState<string[]>([]);
   const [toInput, setToInput] = useState('');
   const [ccChips, setCcChips] = useState<string[]>([]);
@@ -125,86 +35,109 @@ export function ComposeWindow({ session, onSent, onError }: ComposeWindowProps) 
   const [bccInput, setBccInput] = useState('');
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
+
+  // Email Details
   const [subject, setSubject] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [bodyHtml, setBodyHtml] = useState('');
-  const [signature, setSignature] = useState('');
-  const [sending, setSending] = useState(false);
-  const [showSignature, setShowSignature] = useState(false);
-  const [charCount, setCharCount] = useState(0);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [formatting, setFormatting] = useState({
-    bold: false,
-    italic: false,
-    underline: false,
-  });
+  const [isLeadInfoOpen, setIsLeadInfoOpen] = useState(false);
 
-  // Auto-detect first/last name from first "to" email
+  // Signature
+  const defaultSignature = `Lucky Saini\nData Management Expert\nIT | RKD Furnishings Pvt Ltd\n+91 98828 30548 | +91 70182 18843\nwww.rkd.in`;
+  const [signature, setSignature] = useState(defaultSignature);
+  const [includeSignature, setIncludeSignature] = useState(true);
+
+  // Window State
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [showFormatBar, setShowFormatBar] = useState(true);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const toInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto extract First & Last Name from To email
   useEffect(() => {
     if (toChips.length > 0 && !firstName && !lastName) {
       const email = toChips[0];
-      const localPart = email.split('@')[0];
-      const parts = localPart.split(/[._-]/);
+      const local = email.split('@')[0];
+      const parts = local.split(/[._-]/);
       if (parts.length >= 2) {
         setFirstName(parts[0].charAt(0).toUpperCase() + parts[0].slice(1));
         setLastName(parts[1].charAt(0).toUpperCase() + parts[1].slice(1));
-      } else {
+      } else if (parts.length === 1) {
         setFirstName(parts[0].charAt(0).toUpperCase() + parts[0].slice(1));
       }
     }
-  }, [toChips]);
+  }, [toChips, firstName, lastName]);
 
-  const execFormat = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    bodyRef.current?.focus();
-    updateFormatting();
-  };
+  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-  const updateFormatting = () => {
-    setFormatting({
-      bold: document.queryCommandState('bold'),
-      italic: document.queryCommandState('italic'),
-      underline: document.queryCommandState('underline'),
-    });
-  };
-
-  const handleBodyInput = () => {
-    if (bodyRef.current) {
-      setBodyHtml(bodyRef.current.innerHTML);
-      setCharCount(bodyRef.current.innerText.length);
+  const handleToKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') && toInput.trim()) {
+      e.preventDefault();
+      const clean = toInput.trim().replace(/,$/, '');
+      if (isValidEmail(clean)) {
+        setToChips((prev) => [...prev, clean]);
+        setToInput('');
+      }
+    } else if (e.key === 'Backspace' && !toInput && toChips.length > 0) {
+      setToChips((prev) => prev.slice(0, -1));
     }
+  };
+
+  const execCommand = (cmd: string, val?: string) => {
+    document.execCommand(cmd, false, val);
+    bodyRef.current?.focus();
   };
 
   const handleSend = async () => {
     // Validate
+    const finalTo = [...toChips];
     if (toInput.trim() && isValidEmail(toInput.trim())) {
-      toChips.push(toInput.trim());
+      finalTo.push(toInput.trim());
       setToInput('');
     }
-    if (toChips.length === 0) {
-      onError('Please enter at least one recipient email address.');
+
+    if (finalTo.length === 0) {
+      onError('Please specify at least one recipient.');
+      toInputRef.current?.focus();
       return;
     }
+
     if (!subject.trim()) {
-      onError('Please enter a subject for your email.');
+      onError('Please add a subject for your message.');
       return;
     }
-    const body = bodyRef.current?.innerHTML || '';
-    if (!body.trim() || body === '<br>') {
-      onError('Please write your email message.');
+
+    const messageHtml = bodyRef.current?.innerHTML || '';
+    if (!messageHtml.trim() || messageHtml === '<br>') {
+      onError('Please compose a message before sending.');
       return;
     }
 
     setSending(true);
     try {
+      const formattedSignatureHtml = includeSignature && signature ? `
+        <div style="margin-top: 24px; padding-top: 12px; border-top: 1px solid #dadce0; font-family: Roboto, sans-serif; font-size: 13px; color: #5f6368; line-height: 1.6;">
+          --<br/>
+          <strong style="color: #202124; font-size: 15px;">Lucky Saini</strong><br/>
+          <span>Data Management Expert</span><br/>
+          <span style="color: #0b57d0; font-weight: 500;">IT | RKD Furnishings Pvt Ltd</span>
+          <div style="height: 2px; width: 140px; background-color: #c8102e; margin: 8px 0;"></div>
+          <span>📞 +91 98828 30548 | +91 70182 18843</span><br/>
+          <span>🔗 <a href="https://www.rkd.in" target="_blank" style="color: #0b57d0; text-decoration: none;">www.rkd.in</a></span>
+        </div>
+      ` : '';
+
       const payload = {
-        to: toChips,
+        to: finalTo,
         cc: ccChips.length > 0 ? ccChips : undefined,
         bcc: bccChips.length > 0 ? bccChips : undefined,
         subject,
-        body,
-        signature: showSignature ? signature : '',
+        body: messageHtml + formattedSignatureHtml,
+        signature: includeSignature ? signature : '',
         firstName,
         lastName,
       };
@@ -217,10 +150,10 @@ export function ComposeWindow({ session, onSent, onError }: ComposeWindowProps) 
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to send email');
+        throw new Error(data.error || 'Failed to send message');
       }
 
-      // Reset form
+      // Success
       setToChips([]);
       setToInput('');
       setCcChips([]);
@@ -232,341 +165,567 @@ export function ComposeWindow({ session, onSent, onError }: ComposeWindowProps) 
       setLastName('');
       setShowCc(false);
       setShowBcc(false);
-      setShowSignature(false);
-      setSignature('');
       if (bodyRef.current) bodyRef.current.innerHTML = '';
-      setBodyHtml('');
-      setCharCount(0);
+
       onSent();
+      if (onClose) onClose();
     } catch (err: unknown) {
-      onError(err instanceof Error ? err.message : 'Failed to send email. Please try again.');
+      onError(err instanceof Error ? err.message : 'Error sending email');
     } finally {
       setSending(false);
     }
   };
 
+  const commonEmojis = ['😊', '👍', '🙏', '💼', '📄', '✅', '📞', '🤝', '📧', '🚀'];
+
   return (
-    <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden max-w-3xl mx-auto">
-      {/* Compose Header */}
-      <div className="bg-[#404040] text-white px-4 py-2.5 flex items-center justify-between rounded-t-xl">
-        <span className="font-medium text-sm tracking-wide">New Message</span>
-        <div className="flex items-center gap-2">
-          <button className="p-1 hover:bg-white/10 rounded transition-colors" title="Minimize">
-            <Minus size={16} />
-          </button>
-          <button className="p-1 hover:bg-white/10 rounded transition-colors" title="Maximize">
-            <Maximize2 size={14} />
-          </button>
+    <div
+      className={clsx(
+        'bg-white rounded-t-2xl shadow-[0_8px_30px_rgb(0,0,0,0.18)] border border-[#dadce0] flex flex-col overflow-hidden transition-all duration-200 z-50 font-sans',
+        isFloating
+          ? isMaximized
+            ? 'fixed inset-4 z-50 rounded-2xl'
+            : isMinimized
+              ? 'fixed bottom-0 right-4 sm:right-10 w-72 h-10 shadow-lg'
+              : 'fixed bottom-0 right-4 sm:right-10 w-[calc(100vw-32px)] sm:w-[620px] max-h-[85vh] h-[640px]'
+          : 'w-full max-w-4xl mx-auto my-2 rounded-2xl border'
+      )}
+    >
+      {/* 1. Gmail Header Bar */}
+      <div className="bg-[#f2f6fc] border-b border-[#e0e2e6] px-4 py-2.5 flex items-center justify-between select-none">
+        <span className="font-medium text-sm text-[#1f1f1f] tracking-normal font-sans">
+          New Message
+        </span>
+
+        <div className="flex items-center gap-1">
+          {/* Minimize */}
           <button
-            onClick={() => {
-              setToChips([]);
-              setToInput('');
-              setCcChips([]);
-              setCcInput('');
-              setBccChips([]);
-              setBccInput('');
-              setSubject('');
-              setFirstName('');
-              setLastName('');
-              setShowCc(false);
-              setShowBcc(false);
-              if (bodyRef.current) bodyRef.current.innerHTML = '';
-              setBodyHtml('');
-            }}
-            className="p-1 hover:bg-white/10 rounded transition-colors"
-            title="Close"
+            type="button"
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="p-1.5 rounded hover:bg-black/5 text-[#444746] transition-colors"
+            title="Minimize"
           >
-            <X size={16} />
+            <Minus size={14} />
+          </button>
+
+          {/* Fullscreen / Popout */}
+          <button
+            type="button"
+            onClick={() => setIsMaximized(!isMaximized)}
+            className="p-1.5 rounded hover:bg-black/5 text-[#444746] transition-colors"
+            title={isMaximized ? 'Exit full screen' : 'Full screen'}
+          >
+            {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+
+          {/* Close */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded hover:bg-black/5 text-[#444746] transition-colors"
+            title="Save & close"
+          >
+            <X size={15} />
           </button>
         </div>
       </div>
 
-      {/* To field */}
-      <div className="relative">
-        <EmailInput
-          label="To"
-          chips={toChips}
-          onAdd={(e) => setToChips([...toChips, e])}
-          onRemove={(i) => setToChips(toChips.filter((_, idx) => idx !== i))}
-          inputValue={toInput}
-          onInputChange={setToInput}
-          placeholder="Recipients"
-        />
-        {/* Cc / Bcc toggles */}
-        {!showCc || !showBcc ? (
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex gap-2">
-            {!showCc && (
-              <button
-                type="button"
-                onClick={() => setShowCc(true)}
-                className="text-sm text-gray-500 hover:text-gray-800 font-medium transition-colors"
-              >
-                Cc
-              </button>
-            )}
-            {!showBcc && (
-              <button
-                type="button"
-                onClick={() => setShowBcc(true)}
-                className="text-sm text-gray-500 hover:text-gray-800 font-medium transition-colors"
-              >
-                Bcc
-              </button>
+      {/* If minimized, hide body */}
+      {!isMinimized && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* 2. "To" Field with CC/BCC triggers */}
+          <div className="flex items-center px-4 py-1.5 border-b border-[#f1f3f4] min-h-[42px] relative">
+            <span className="text-sm text-[#444746] font-normal w-9 flex-shrink-0">To</span>
+            
+            <div className="flex flex-wrap items-center gap-1.5 flex-1 pr-16 min-h-[28px]">
+              {toChips.map((email, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 bg-[#e8eaed] hover:bg-[#dfe2e6] text-[#1f1f1f] text-xs font-medium px-2.5 py-1 rounded-full border border-[#dadce0]"
+                >
+                  <span>{email}</span>
+                  <button
+                    type="button"
+                    onClick={() => setToChips(toChips.filter((_, i) => i !== idx))}
+                    className="text-[#5f6368] hover:text-[#1f1f1f]"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={toInputRef}
+                type="text"
+                value={toInput}
+                onChange={(e) => setToInput(e.target.value)}
+                onKeyDown={handleToKeyDown}
+                placeholder={toChips.length === 0 ? 'Recipients' : ''}
+                className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
+              />
+            </div>
+
+            {/* CC / BCC Buttons on right */}
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-xs font-medium text-[#444746]">
+              {!showCc && (
+                <button
+                  type="button"
+                  onClick={() => setShowCc(true)}
+                  className="hover:text-[#1f1f1f] hover:underline"
+                >
+                  Cc
+                </button>
+              )}
+              {!showBcc && (
+                <button
+                  type="button"
+                  onClick={() => setShowBcc(true)}
+                  className="hover:text-[#1f1f1f] hover:underline"
+                >
+                  Bcc
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 3. CC Field */}
+          {showCc && (
+            <div className="flex items-center px-4 py-1.5 border-b border-[#f1f3f4] min-h-[38px]">
+              <span className="text-sm text-[#444746] font-normal w-9 flex-shrink-0">Cc</span>
+              <div className="flex flex-wrap items-center gap-1.5 flex-1">
+                {ccChips.map((email, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 bg-[#e8eaed] text-[#1f1f1f] text-xs font-medium px-2.5 py-0.5 rounded-full border border-[#dadce0]"
+                  >
+                    <span>{email}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCcChips(ccChips.filter((_, i) => i !== idx))}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  type="text"
+                  value={ccInput}
+                  onChange={(e) => setCcInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Enter' || e.key === ',') && ccInput.trim()) {
+                      e.preventDefault();
+                      if (isValidEmail(ccInput.trim())) {
+                        setCcChips([...ccChips, ccInput.trim()]);
+                        setCcInput('');
+                      }
+                    }
+                  }}
+                  placeholder={ccChips.length === 0 ? 'Carbon copy' : ''}
+                  className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 4. BCC Field */}
+          {showBcc && (
+            <div className="flex items-center px-4 py-1.5 border-b border-[#f1f3f4] min-h-[38px]">
+              <span className="text-sm text-[#444746] font-normal w-9 flex-shrink-0">Bcc</span>
+              <div className="flex flex-wrap items-center gap-1.5 flex-1">
+                {bccChips.map((email, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 bg-[#e8eaed] text-[#1f1f1f] text-xs font-medium px-2.5 py-0.5 rounded-full border border-[#dadce0]"
+                  >
+                    <span>{email}</span>
+                    <button
+                      type="button"
+                      onClick={() => setBccChips(bccChips.filter((_, i) => i !== idx))}
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  type="text"
+                  value={bccInput}
+                  onChange={(e) => setBccInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Enter' || e.key === ',') && bccInput.trim()) {
+                      e.preventDefault();
+                      if (isValidEmail(bccInput.trim())) {
+                        setBccChips([...bccChips, bccInput.trim()]);
+                        setBccInput('');
+                      }
+                    }
+                  }}
+                  placeholder={bccChips.length === 0 ? 'Blind carbon copy' : ''}
+                  className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 5. Subject Field */}
+          <div className="flex items-center px-4 py-2 border-b border-[#f1f3f4]">
+            <input
+              type="text"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Subject"
+              className="w-full bg-transparent text-sm text-[#1f1f1f] outline-none border-none placeholder-[#747775] font-normal"
+            />
+          </div>
+
+          {/* 6. Google Sheets Lead Extractor Info Bar (Collapsible) */}
+          <div className="bg-[#f8fafd] border-b border-[#e0e2e6] px-4 py-1.5 text-xs flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setIsLeadInfoOpen(!isLeadInfoOpen)}
+              className="flex items-center gap-2 text-[#0b57d0] hover:text-[#0842a0] font-medium"
+            >
+              <span>📊 Sheets Lead Data:</span>
+              <span className="text-[#444746] font-normal">
+                {firstName || lastName ? `${firstName} ${lastName}`.trim() : 'Auto-extracting from email'}
+              </span>
+              <ChevronDown size={14} className={clsx('transition-transform', isLeadInfoOpen && 'rotate-180')} />
+            </button>
+
+            <span className="text-[#747775] text-[11px] hidden sm:inline">
+              Auto-saved to Sheet: <strong>Gmail</strong>
+            </span>
+          </div>
+
+          {isLeadInfoOpen && (
+            <div className="bg-[#f0f4f9] px-4 py-2 border-b border-[#dadce0] grid grid-cols-2 gap-3 animate-slide-up-fade">
+              <div>
+                <label className="text-[11px] text-[#444746] font-medium block mb-1">First Name (Sheet Col A)</label>
+                <input
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="e.g. Lucky"
+                  className="w-full bg-white border border-[#dadce0] rounded-md px-2.5 py-1 text-xs text-[#1f1f1f] outline-none focus:border-[#0b57d0]"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-[#444746] font-medium block mb-1">Last Name (Sheet Col B)</label>
+                <input
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="e.g. Saini"
+                  className="w-full bg-white border border-[#dadce0] rounded-md px-2.5 py-1 text-xs text-[#1f1f1f] outline-none focus:border-[#0b57d0]"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* 7. Editable Message Canvas */}
+          <div className="flex-1 p-4 overflow-y-auto relative min-h-[180px] bg-white">
+            <div
+              ref={bodyRef}
+              contentEditable
+              suppressContentEditableWarning
+              data-placeholder="Write your email here..."
+              className="outline-none text-sm text-[#1f1f1f] min-h-[140px] leading-relaxed font-sans"
+              style={{ minHeight: '140px' }}
+            />
+
+            {/* Signature Preview */}
+            {includeSignature && (
+              <div className="mt-8 pt-4 border-t border-[#dadce0] text-xs text-[#5f6368] select-none font-sans">
+                <div className="text-[13px] text-[#444746] mb-1">--</div>
+                <div className="font-bold text-[15px] text-[#1f1f1f] leading-snug">Lucky Saini</div>
+                <div className="text-xs text-[#444746]">Data Management Expert</div>
+                <div className="text-xs text-[#0b57d0] font-medium">IT | RKD Furnishings Pvt Ltd</div>
+                <div className="h-0.5 w-32 bg-[#c8102e] my-2"></div>
+                <div className="text-xs text-[#444746]">📞 +91 98828 30548 | +91 70182 18843</div>
+                <div className="text-xs text-[#0b57d0]">🔗 www.rkd.in</div>
+              </div>
             )}
           </div>
-        ) : null}
-      </div>
 
-      {/* Cc field */}
-      {showCc && (
-        <EmailInput
-          label="Cc"
-          chips={ccChips}
-          onAdd={(e) => setCcChips([...ccChips, e])}
-          onRemove={(i) => setCcChips(ccChips.filter((_, idx) => idx !== i))}
-          inputValue={ccInput}
-          onInputChange={setCcInput}
-          placeholder="Carbon copy"
-        />
-      )}
+          {/* 8. Gmail Formatting Toolbar (Exact Replica of Screenshot) */}
+          {showFormatBar && (
+            <div className="bg-[#f2f6fc] border-t border-[#e0e2e6] px-3 py-1.5 flex items-center gap-1 overflow-x-auto select-none text-xs text-[#444746]">
+              {/* Font Family */}
+              <select
+                onChange={(e) => execCommand('fontName', e.target.value)}
+                className="bg-transparent border-none outline-none text-xs text-[#444746] py-1 cursor-pointer font-medium hover:bg-black/5 rounded px-1"
+                defaultValue="Sans Serif"
+              >
+                <option value="Arial, sans-serif">Sans Serif</option>
+                <option value="Georgia, serif">Serif</option>
+                <option value="Courier New, monospace">Fixed Width</option>
+                <option value="Comic Sans MS">Comic Sans</option>
+                <option value="Garamond">Garamond</option>
+                <option value="Trebuchet MS">Trebuchet</option>
+                <option value="Verdana">Verdana</option>
+              </select>
 
-      {/* Bcc field */}
-      {showBcc && (
-        <EmailInput
-          label="Bcc"
-          chips={bccChips}
-          onAdd={(e) => setBccChips([...bccChips, e])}
-          onRemove={(i) => setBccChips(bccChips.filter((_, idx) => idx !== i))}
-          inputValue={bccInput}
-          onInputChange={setBccInput}
-          placeholder="Blind carbon copy"
-        />
-      )}
+              <div className="h-4 w-px bg-[#dadce0] mx-0.5" />
 
-      {/* Subject */}
-      <div className="px-4 py-2 border-b border-gray-200">
-        <input
-          type="text"
-          placeholder="Subject"
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          className="w-full text-sm text-gray-800 outline-none placeholder-gray-400 bg-transparent font-medium py-1"
-        />
-      </div>
+              {/* Font Size */}
+              <select
+                onChange={(e) => execCommand('fontSize', e.target.value)}
+                className="bg-transparent border-none outline-none text-xs text-[#444746] py-1 cursor-pointer font-medium hover:bg-black/5 rounded px-1"
+                defaultValue="3"
+              >
+                <option value="1">Small</option>
+                <option value="3">Normal</option>
+                <option value="5">Large</option>
+                <option value="7">Huge</option>
+              </select>
 
-      {/* Recipient Name Row (for Sheets logging) */}
-      <div className="px-4 py-2 border-b border-gray-200 bg-blue-50/50 flex gap-3 items-center flex-wrap">
-        <span className="text-xs text-blue-600 font-medium flex-shrink-0">📊 For Sheets Log:</span>
-        <input
-          type="text"
-          placeholder="Recipient First Name"
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-          className="text-xs text-gray-700 outline-none placeholder-gray-400 bg-transparent border-b border-blue-200 focus:border-blue-400 py-0.5 flex-1 min-w-[120px] transition-colors"
-        />
-        <input
-          type="text"
-          placeholder="Recipient Last Name"
-          value={lastName}
-          onChange={(e) => setLastName(e.target.value)}
-          className="text-xs text-gray-700 outline-none placeholder-gray-400 bg-transparent border-b border-blue-200 focus:border-blue-400 py-0.5 flex-1 min-w-[120px] transition-colors"
-        />
-      </div>
+              <div className="h-4 w-px bg-[#dadce0] mx-0.5" />
 
-      {/* Email Body - ContentEditable */}
-      <div
-        ref={bodyRef}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={handleBodyInput}
-        onKeyUp={updateFormatting}
-        onMouseUp={updateFormatting}
-        data-placeholder="Write your message here..."
-        className="min-h-[220px] max-h-[380px] overflow-y-auto px-4 py-4 text-sm text-gray-800 outline-none leading-relaxed relative"
-        style={{ fontFamily: 'Google Sans, Roboto, sans-serif' }}
-      />
+              {/* B I U */}
+              <button
+                type="button"
+                onClick={() => execCommand('bold')}
+                className="p-1 rounded hover:bg-black/5 font-bold text-sm w-6 h-6 flex items-center justify-center text-[#1f1f1f]"
+                title="Bold (Ctrl+B)"
+              >
+                B
+              </button>
+              <button
+                type="button"
+                onClick={() => execCommand('italic')}
+                className="p-1 rounded hover:bg-black/5 italic text-sm w-6 h-6 flex items-center justify-center text-[#1f1f1f]"
+                title="Italic (Ctrl+I)"
+              >
+                I
+              </button>
+              <button
+                type="button"
+                onClick={() => execCommand('underline')}
+                className="p-1 rounded hover:bg-black/5 underline text-sm w-6 h-6 flex items-center justify-center text-[#1f1f1f]"
+                title="Underline (Ctrl+U)"
+              >
+                U
+              </button>
 
-      {/* Signature section */}
-      {showSignature && (
-        <div className="px-4 pb-2 border-t border-gray-100">
-          <p className="text-xs text-gray-400 mt-2 mb-1 font-medium">Signature (will be logged to Sheets):</p>
-          <textarea
-            value={signature}
-            onChange={(e) => setSignature(e.target.value)}
-            placeholder="e.g. John Doe | Sales Manager | john@company.com"
-            rows={3}
-            className="w-full text-xs text-gray-600 border border-gray-200 rounded-lg px-3 py-2 outline-none resize-none focus:border-blue-400 transition-colors"
-          />
-        </div>
-      )}
+              <div className="h-4 w-px bg-[#dadce0] mx-0.5" />
 
-      {/* Character count */}
-      {charCount > 0 && (
-        <div className="px-4 pb-1 text-right">
-          <span className="text-xs text-gray-400">{charCount} chars</span>
-        </div>
-      )}
+              {/* Alignment */}
+              <button
+                type="button"
+                onClick={() => execCommand('justifyLeft')}
+                className="p-1 rounded hover:bg-black/5 text-[#444746]"
+                title="Align Left"
+              >
+                <AlignLeft size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => execCommand('justifyCenter')}
+                className="p-1 rounded hover:bg-black/5 text-[#444746]"
+                title="Align Center"
+              >
+                <AlignCenter size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => execCommand('justifyRight')}
+                className="p-1 rounded hover:bg-black/5 text-[#444746]"
+                title="Align Right"
+              >
+                <AlignRight size={15} />
+              </button>
 
-      {/* Formatting Toolbar */}
-      <div className="border-t border-gray-200 px-3 py-1.5 flex items-center gap-0.5 flex-wrap">
-        <select
-          onChange={(e) => execFormat('fontName', e.target.value)}
-          className="text-xs border border-gray-200 rounded px-1.5 py-1 mr-2 outline-none focus:border-blue-400 text-gray-600 bg-white"
-        >
-          <option value="sans-serif">Sans Serif</option>
-          <option value="serif">Serif</option>
-          <option value="monospace">Mono</option>
-          <option value="Georgia">Georgia</option>
-        </select>
+              <div className="h-4 w-px bg-[#dadce0] mx-0.5" />
 
-        <select
-          onChange={(e) => execFormat('fontSize', e.target.value)}
-          className="text-xs border border-gray-200 rounded px-1.5 py-1 mr-2 outline-none focus:border-blue-400 text-gray-600 bg-white"
-        >
-          {['8', '10', '11', '12', '14', '16', '18', '24', '36'].map(s => (
-            <option key={s} value={s}>{s}px</option>
-          ))}
-        </select>
+              {/* Lists */}
+              <button
+                type="button"
+                onClick={() => execCommand('insertOrderedList')}
+                className="p-1 rounded hover:bg-black/5 text-[#444746]"
+                title="Numbered List"
+              >
+                <ListOrdered size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => execCommand('insertUnorderedList')}
+                className="p-1 rounded hover:bg-black/5 text-[#444746]"
+                title="Bulleted List"
+              >
+                <List size={15} />
+              </button>
 
-        <div className="h-5 w-px bg-gray-200 mx-1" />
+              {/* Quote */}
+              <button
+                type="button"
+                onClick={() => execCommand('formatBlock', 'blockquote')}
+                className="p-1 rounded hover:bg-black/5 text-[#444746]"
+                title="Quote"
+              >
+                <Quote size={14} />
+              </button>
+            </div>
+          )}
 
-        <ToolbarBtn onClick={() => execFormat('bold')} title="Bold" active={formatting.bold}>
-          <span className="font-bold text-sm w-4 h-4 flex items-center justify-center">B</span>
-        </ToolbarBtn>
-        <ToolbarBtn onClick={() => execFormat('italic')} title="Italic" active={formatting.italic}>
-          <span className="italic text-sm w-4 h-4 flex items-center justify-center">I</span>
-        </ToolbarBtn>
-        <ToolbarBtn onClick={() => execFormat('underline')} title="Underline" active={formatting.underline}>
-          <span className="underline text-sm w-4 h-4 flex items-center justify-center">U</span>
-        </ToolbarBtn>
+          {/* 9. Bottom Action Bar (Send Button + Icons) */}
+          <div className="px-4 py-3 bg-white border-t border-[#e0e2e6] flex items-center justify-between select-none relative">
+            <div className="flex items-center gap-3">
+              {/* Blue Gmail Send Button */}
+              <div className="inline-flex rounded-full overflow-hidden shadow-xs hover:shadow-md transition-shadow">
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={sending}
+                  className="bg-[#0b57d0] hover:bg-[#105dc1] active:bg-[#0842a0] text-white px-5 py-2.5 font-medium text-sm flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  {sending ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <span>Send</span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="bg-[#0b57d0] hover:bg-[#105dc1] text-white px-2.5 py-2.5 border-l border-white/20 transition-colors"
+                  title="Schedule send"
+                >
+                  <ChevronDown size={14} />
+                </button>
+              </div>
 
-        <div className="h-5 w-px bg-gray-200 mx-1" />
+              {/* Action Icons matching user's screenshot */}
+              <div className="flex items-center gap-0.5 sm:gap-1 text-[#444746]">
+                {/* Format options toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowFormatBar(!showFormatBar)}
+                  className={clsx('p-2 rounded-full hover:bg-black/5 font-serif text-sm', showFormatBar && 'bg-[#eaf1fb] text-[#0b57d0]')}
+                  title="Formatting options"
+                >
+                  Aa
+                </button>
 
-        <ToolbarBtn onClick={() => execFormat('justifyLeft')} title="Align Left">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M15 15H3v2h12v-2zm0-8H3v2h12V7zM3 13h18v-2H3v2zm0 8h18v-2H3v2zM3 3v2h18V3H3z"/>
-          </svg>
-        </ToolbarBtn>
-        <ToolbarBtn onClick={() => execFormat('justifyCenter')} title="Align Center">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M7 15v2h10v-2H7zm-4 6h18v-2H3v2zm0-8h18v-2H3v2zm4-6v2h10V7H7zM3 3v2h18V3H3z"/>
-          </svg>
-        </ToolbarBtn>
-        <ToolbarBtn onClick={() => execFormat('insertUnorderedList')} title="Bullet List">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z"/>
-          </svg>
-        </ToolbarBtn>
-        <ToolbarBtn onClick={() => execFormat('insertOrderedList')} title="Numbered List">
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z"/>
-          </svg>
-        </ToolbarBtn>
+                {/* AI / Magic button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (bodyRef.current && !bodyRef.current.innerText.trim()) {
+                      bodyRef.current.innerHTML = 'Dear Partner,<br/><br/>I hope this email finds you well. Regarding our recent export catalog from RKD Furnishings, please find the latest product specifications attached.<br/><br/>Best regards,';
+                    }
+                  }}
+                  className="p-2 rounded-full hover:bg-black/5 text-[#0b57d0]"
+                  title="Draft with AI template"
+                >
+                  <Sparkles size={17} />
+                </button>
 
-        <div className="h-5 w-px bg-gray-200 mx-1" />
+                {/* Attachment */}
+                <button
+                  type="button"
+                  className="p-2 rounded-full hover:bg-black/5"
+                  title="Attach files"
+                  onClick={() => onError('Attachments will be included via Google Drive links.')}
+                >
+                  <Paperclip size={17} />
+                </button>
 
-        <ToolbarBtn
-          onClick={() => setShowSignature(!showSignature)}
-          title="Add Signature"
-          active={showSignature}
-        >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-          </svg>
-        </ToolbarBtn>
-      </div>
+                {/* Link */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = prompt('Enter URL:');
+                    if (url) execCommand('createLink', url);
+                  }}
+                  className="p-2 rounded-full hover:bg-black/5"
+                  title="Insert link (Ctrl+K)"
+                >
+                  <Link2 size={17} />
+                </button>
 
-      {/* Bottom action bar */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-t border-gray-200">
-        {/* Send Button */}
-        <div className="flex items-center rounded-full overflow-hidden shadow-sm">
-          <button
-            onClick={handleSend}
-            disabled={sending}
-            className={clsx(
-              'flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white transition-all duration-200 rounded-l-full',
-              sending
-                ? 'bg-blue-400 cursor-not-allowed'
-                : 'bg-[#1a73e8] hover:bg-[#1557b0] active:scale-95'
-            )}
-          >
-            {sending ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                <span>Sending...</span>
-              </>
-            ) : (
-              <>
-                <Send size={15} />
-                <span>Send</span>
-              </>
-            )}
-          </button>
-          <button
-            className="bg-[#1a73e8] hover:bg-[#1557b0] text-white px-2.5 py-2 border-l border-blue-600/40 rounded-r-full transition-colors"
-            title="Schedule send"
-            disabled={sending}
-          >
-            <ChevronDown size={16} />
-          </button>
-        </div>
+                {/* Emoji */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className={clsx('p-2 rounded-full hover:bg-black/5', showEmojiPicker && 'bg-[#eaf1fb]')}
+                    title="Insert emoji"
+                  >
+                    <Smile size={17} />
+                  </button>
 
-        {/* Action icons - Gmail-like */}
-        <div className="flex items-center gap-1 ml-1">
-          {[
-            { icon: <Paperclip size={18} />, title: 'Attach file' },
-            { icon: <Link2 size={18} />, title: 'Insert link' },
-            { icon: <Smile size={18} />, title: 'Insert emoji' },
-            { icon: <Image size={18} />, title: 'Insert image' },
-          ].map((action, i) => (
+                  {showEmojiPicker && (
+                    <div className="absolute bottom-full left-0 mb-2 p-2 bg-white rounded-xl shadow-lg border border-[#dadce0] flex gap-1 z-50">
+                      {commonEmojis.map((em) => (
+                        <button
+                          key={em}
+                          type="button"
+                          onClick={() => {
+                            if (bodyRef.current) bodyRef.current.innerHTML += em;
+                            setShowEmojiPicker(false);
+                          }}
+                          className="hover:bg-[#f1f3f4] p-1.5 rounded text-base"
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Photo / Image */}
+                <button
+                  type="button"
+                  className="p-2 rounded-full hover:bg-black/5 hidden sm:block"
+                  title="Insert photo"
+                >
+                  <ImageIcon size={17} />
+                </button>
+
+                {/* Signature Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setIncludeSignature(!includeSignature)}
+                  className={clsx(
+                    'p-2 rounded-full hover:bg-black/5',
+                    includeSignature && 'text-[#0b57d0] bg-[#eaf1fb]'
+                  )}
+                  title="Insert signature"
+                >
+                  <PenTool size={16} />
+                </button>
+
+                {/* Confidential mode */}
+                <button
+                  type="button"
+                  className="p-2 rounded-full hover:bg-black/5 hidden sm:block"
+                  title="Toggle confidential mode"
+                >
+                  <Lock size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Trash button on far right */}
             <button
-              key={i}
-              title={action.title}
-              className="p-2 rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              type="button"
+              onClick={() => {
+                if (confirm('Discard this draft?')) {
+                  setToChips([]);
+                  setToInput('');
+                  setSubject('');
+                  if (bodyRef.current) bodyRef.current.innerHTML = '';
+                  if (onClose) onClose();
+                }
+              }}
+              className="p-2 rounded-full hover:bg-black/5 text-[#444746] hover:text-[#c5221f] transition-colors"
+              title="Discard draft"
             >
-              {action.icon}
+              <Trash2 size={17} />
             </button>
-          ))}
+          </div>
         </div>
-
-        <div className="flex-1" />
-
-        {/* Delete */}
-        <button
-          title="Discard draft"
-          onClick={() => {
-            setToChips([]);
-            setToInput('');
-            setCcChips([]);
-            setCcInput('');
-            setBccChips([]);
-            setBccInput('');
-            setSubject('');
-            setFirstName('');
-            setLastName('');
-            setShowCc(false);
-            setShowBcc(false);
-            if (bodyRef.current) bodyRef.current.innerHTML = '';
-            setBodyHtml('');
-            setShowSignature(false);
-            setSignature('');
-            setCharCount(0);
-          }}
-          className="p-2 rounded-full text-gray-500 hover:bg-gray-100 hover:text-red-500 transition-colors"
-        >
-          <Trash2 size={18} />
-        </button>
-      </div>
-
-      {/* CSS for contenteditable placeholder */}
-      <style jsx>{`
-        div[data-placeholder]:empty:before {
-          content: attr(data-placeholder);
-          color: #9aa0a6;
-          pointer-events: none;
-        }
-      `}</style>
+      )}
     </div>
   );
 }
-

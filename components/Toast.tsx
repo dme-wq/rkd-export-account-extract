@@ -1,6 +1,6 @@
 'use client';
 
-import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
 import { clsx } from 'clsx';
 
 interface ToastProps {
@@ -10,34 +10,31 @@ interface ToastProps {
 }
 
 export function Toast({ message, type, onDismiss }: ToastProps) {
-  const icons = {
-    success: <CheckCircle size={18} className="text-green-400 flex-shrink-0" />,
-    error: <AlertCircle size={18} className="text-red-400 flex-shrink-0" />,
-    info: <Info size={18} className="text-blue-400 flex-shrink-0" />,
-  };
-
-  const colors = {
-    success: 'border-l-green-500',
-    error: 'border-l-red-500',
-    info: 'border-l-blue-500',
-  };
-
   return (
     <div
       className={clsx(
-        'pointer-events-auto flex items-center gap-3 bg-gray-900 text-white rounded-xl px-4 py-3 shadow-2xl border-l-4 min-w-[280px] max-w-[90vw] animate-slide-up',
-        colors[type]
+        'pointer-events-auto flex items-center gap-3 bg-[#323232] text-white rounded-xl px-4 py-3 shadow-[0_4px_16px_rgba(0,0,0,0.25)] min-w-[280px] max-w-[90vw] animate-toast border-l-4 transition-all duration-200 select-none font-sans',
+        type === 'success' && 'border-l-[#1e8e3e]',
+        type === 'error' && 'border-l-[#d93025]',
+        type === 'info' && 'border-l-[#1a73e8]'
       )}
     >
-      {icons[type]}
-      <span className="text-sm flex-1 font-medium leading-tight">{message}</span>
+      {type === 'success' && <CheckCircle2 size={18} className="text-[#34a853] flex-shrink-0" />}
+      {type === 'error' && <AlertCircle size={18} className="text-[#ea4335] flex-shrink-0" />}
+      {type === 'info' && <Info size={18} className="text-[#4285f4] flex-shrink-0" />}
+
+      <span className="text-xs sm:text-sm font-medium flex-1 text-white leading-tight">
+        {message}
+      </span>
+
       <button
+        type="button"
         onClick={onDismiss}
-        className="text-gray-400 hover:text-white transition-colors p-0.5 rounded"
+        className="text-[#9aa0a6] hover:text-white p-1 rounded-full transition-colors flex-shrink-0"
+        title="Dismiss"
       >
-        <X size={16} />
+        <X size={15} />
       </button>
     </div>
   );
 }
-

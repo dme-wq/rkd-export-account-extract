@@ -1,23 +1,31 @@
 'use client';
 
 import { Session } from 'next-auth';
-import { Menu, LogOut, ChevronDown } from 'lucide-react';
+import { Menu, Search, SlidersHorizontal, HelpCircle, Settings, Grid, LogOut, ExternalLink, ChevronDown } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 
 interface HeaderProps {
   session: Session;
-  onMenuClick: () => void;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  onMenuToggle: () => void;
   onSignOut: () => void;
 }
 
-export function Header({ session, onMenuClick, onSignOut }: HeaderProps) {
-  const [showUserMenu, setShowUserMenu] = useState(false);
+export function Header({
+  session,
+  searchQuery,
+  onSearchChange,
+  onMenuToggle,
+  onSignOut,
+}: HeaderProps) {
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowUserMenu(false);
+        setShowProfileMenu(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -25,106 +33,157 @@ export function Header({ session, onMenuClick, onSignOut }: HeaderProps) {
   }, []);
 
   return (
-    <header className="bg-white border-b border-gray-200 h-14 flex items-center px-4 gap-3 flex-shrink-0 z-30 sticky top-0">
-      {/* Hamburger (mobile) */}
-      <button
-        onClick={onMenuClick}
-        className="p-2 rounded-full hover:bg-gray-100 transition-colors md:hidden"
-        aria-label="Menu"
-      >
-        <Menu size={20} className="text-gray-600" />
-      </button>
+    <header className="h-16 bg-[#f6f8fc] px-4 flex items-center justify-between gap-4 border-b border-[#e0e2e6] select-none flex-shrink-0 z-30">
+      {/* Left: Hamburger & Gmail/RKD Brand */}
+      <div className="flex items-center gap-3 min-w-[240px]">
+        <button
+          onClick={onMenuToggle}
+          className="p-2.5 rounded-full hover:bg-[#eaf1fb] text-[#444746] transition-colors"
+          title="Main menu"
+          type="button"
+        >
+          <Menu size={20} />
+        </button>
 
-      {/* Logo + Title */}
-      <div className="flex items-center gap-3 flex-shrink-0">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="https://static.wixstatic.com/media/68b92a_d71e34133826499983234774dea1945b~mv2.png/v1/fill/w_186,h_156,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/RKD-Logo.png"
-          alt="RKD Logo"
-          className="h-8 w-auto object-contain"
-        />
-        <div className="hidden sm:block">
-          <span className="text-base font-semibold text-gray-800 leading-tight block">
-            RKD Export Leads
-          </span>
-          <span className="text-xs text-[#1a73e8] font-medium leading-tight block">
-            Gmail Account Extractor
-          </span>
-        </div>
-        <div className="block sm:hidden">
-          <span className="text-sm font-semibold text-gray-800">RKD Gmail</span>
+        <div className="flex items-center gap-2.5 cursor-pointer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="https://static.wixstatic.com/media/68b92a_d71e34133826499983234774dea1945b~mv2.png/v1/fill/w_186,h_156,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/RKD-Logo.png"
+            alt="RKD Logo"
+            className="h-8 w-auto object-contain"
+          />
+          <div className="flex flex-col">
+            <span className="text-[20px] font-normal tracking-tight text-[#1f1f1f] leading-none font-sans">
+              Gmail
+            </span>
+            <span className="text-[11px] font-medium text-[#0b57d0] tracking-wide leading-tight">
+              RKD Leads Extractor
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      {/* Center: Gmail Search Bar */}
+      <div className="flex-1 max-w-[720px] mx-auto hidden sm:block">
+        <div className="flex items-center bg-[#eaf1fb] hover:bg-[#dfeaf8] focus-within:bg-white focus-within:shadow-[0_1px_3px_0_rgba(60,64,67,0.3),0_4px_8px_3px_rgba(60,64,67,0.15)] rounded-full px-4 py-2.5 transition-all duration-200 border border-transparent focus-within:border-transparent">
+          <Search size={18} className="text-[#444746] mr-3 flex-shrink-0" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search mail or leads"
+            className="w-full bg-transparent border-none outline-none text-sm text-[#1f1f1f] placeholder-[#444746]"
+          />
+          <button
+            type="button"
+            className="p-1 rounded-full hover:bg-black/5 text-[#444746] transition-colors"
+            title="Search options"
+          >
+            <SlidersHorizontal size={16} />
+          </button>
+        </div>
+      </div>
 
-      {/* User menu */}
-      <div className="relative" ref={menuRef}>
-        <button
-          onClick={() => setShowUserMenu(!showUserMenu)}
-          className="flex items-center gap-2 rounded-full hover:bg-gray-100 p-1.5 transition-colors"
+      {/* Right: Quick Links, Google Sheet, Apps & Profile */}
+      <div className="flex items-center gap-1 sm:gap-2">
+        {/* Google Sheet Live Button */}
+        <a
+          href="https://docs.google.com/spreadsheets/d/1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM/edit"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hidden md:flex items-center gap-1.5 bg-white hover:bg-[#f8fafd] border border-[#dadce0] text-[#1e8e3e] hover:text-[#137333] px-3 py-1.5 rounded-full text-xs font-medium shadow-xs transition-colors"
+          title="Open Google Sheet Leads"
         >
-          {session.user?.image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={session.user.image}
-              alt={session.user.name || 'User'}
-              className="w-8 h-8 rounded-full object-cover ring-2 ring-gray-200"
-            />
-          ) : (
-            <div className="w-8 h-8 rounded-full bg-[#1a73e8] flex items-center justify-center text-white text-sm font-semibold">
-              {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
-            </div>
-          )}
-          <ChevronDown size={14} className="text-gray-500 hidden sm:block" />
+          {/* Sheets Icon */}
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" fill="#0F9D58"/>
+            <path d="M17 13H7v-2h10v2zm0-4H7V7h10v2zm0 8H7v-2h10v2z" fill="#ffffff"/>
+          </svg>
+          <span className="font-semibold text-gray-700">Google Sheet</span>
+          <ExternalLink size={12} className="text-gray-400" />
+        </a>
+
+        {/* Support / Help */}
+        <button
+          type="button"
+          className="p-2 rounded-full hover:bg-[#eaf1fb] text-[#444746] transition-colors hidden sm:block"
+          title="Support & Info"
+        >
+          <HelpCircle size={20} />
         </button>
 
-        {showUserMenu && (
-          <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden animate-fade-in">
-            {/* User info */}
-            <div className="p-4 border-b border-gray-100">
-              <div className="flex items-center gap-3">
+        {/* Google Apps Icon (9 dots) */}
+        <button
+          type="button"
+          className="p-2 rounded-full hover:bg-[#eaf1fb] text-[#444746] transition-colors hidden sm:block"
+          title="Google Apps"
+        >
+          <Grid size={20} />
+        </button>
+
+        {/* User Profile Avatar with dropdown */}
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setShowProfileMenu(!showProfileMenu)}
+            className="flex items-center gap-1 p-1 rounded-full hover:ring-4 hover:ring-[#eaf1fb] transition-all"
+            title={`Google Account: ${session.user?.name || session.user?.email}`}
+          >
+            {session.user?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={session.user.image}
+                alt={session.user.name || 'User'}
+                className="w-8 h-8 rounded-full object-cover ring-2 ring-[#c2e7ff]"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-[#0b57d0] text-white flex items-center justify-center font-medium text-sm">
+                {(session.user?.name || session.user?.email || 'U')[0].toUpperCase()}
+              </div>
+            )}
+            <ChevronDown size={14} className="text-[#444746] hidden sm:block" />
+          </button>
+
+          {/* Profile Menu Popup */}
+          {showProfileMenu && (
+            <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-[24px] shadow-[0_4px_16px_rgba(0,0,0,0.15)] border border-[#e0e2e6] p-4 z-50 animate-slide-up-fade">
+              <div className="flex flex-col items-center text-center p-3 border-b border-[#e0e2e6]">
                 {session.user?.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={session.user.image}
                     alt="User"
-                    className="w-12 h-12 rounded-full object-cover"
+                    className="w-16 h-16 rounded-full object-cover ring-4 ring-[#c2e7ff] mb-3"
                   />
                 ) : (
-                  <div className="w-12 h-12 rounded-full bg-[#1a73e8] flex items-center justify-center text-white text-lg font-semibold">
+                  <div className="w-16 h-16 rounded-full bg-[#0b57d0] text-white flex items-center justify-center text-2xl font-medium mb-3">
                     {(session.user?.name || 'U')[0].toUpperCase()}
                   </div>
                 )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">
-                    {session.user?.name || 'User'}
-                  </p>
-                  <p className="text-sm text-gray-500 truncate">
-                    {session.user?.email}
-                  </p>
+                <p className="font-semibold text-base text-[#1f1f1f]">{session.user?.name || 'User'}</p>
+                <p className="text-xs text-[#747775] mt-0.5">{session.user?.email}</p>
+                <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#eaf1fb] text-[#0b57d0] text-xs font-medium">
+                  <span>Connected via Gmail API</span>
                 </div>
               </div>
-            </div>
 
-            {/* Actions */}
-            <div className="p-2">
-              <button
-                onClick={() => {
-                  setShowUserMenu(false);
-                  onSignOut();
-                }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 rounded-xl transition-colors font-medium"
-              >
-                <LogOut size={16} />
-                Sign out
-              </button>
+              <div className="pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    onSignOut();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-full border border-[#dadce0] hover:bg-[#f8fafd] text-[#c5221f] text-sm font-medium transition-colors"
+                >
+                  <LogOut size={16} />
+                  <span>Sign out</span>
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );
 }
-

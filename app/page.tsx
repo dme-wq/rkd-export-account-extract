@@ -1,6 +1,6 @@
 'use client';
 
-import { useSession, signIn, signOut } from 'next-auth/react';
+import { useSession, signOut } from 'next-auth/react';
 import { useState, useEffect, useCallback } from 'react';
 import { ComposeWindow } from '@/components/ComposeWindow';
 import { SentLog } from '@/components/SentLog';
@@ -28,7 +28,9 @@ export type SentRecord = {
 
 export default function Home() {
   const { data: session, status } = useSession();
-  const [activeView, setActiveView] = useState<'compose' | 'sent'>('compose');
+  const [activeView, setActiveView] = useState<'compose' | 'sent'>('sent');
+  const [isComposeOpen, setIsComposeOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const [toasts, setToasts] = useState<ToastType[]>([]);
   const [records, setRecords] = useState<SentRecord[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
@@ -39,7 +41,7 @@ export default function Home() {
     setToasts((prev) => [...prev, { message, type, id }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    }, 4500);
   }, []);
 
   const fetchRecords = useCallback(async () => {
@@ -52,7 +54,7 @@ export default function Home() {
         setRecords(data.records || []);
       }
     } catch {
-      // silent fail
+      // silent
     } finally {
       setRecordsLoading(false);
     }
@@ -65,72 +67,108 @@ export default function Home() {
   }, [session, fetchRecords]);
 
   const handleEmailSent = useCallback(() => {
-    addToast('Email sent and logged to Google Sheets!', 'success');
+    addToast('Message sent and lead saved to Google Sheet!', 'success');
     fetchRecords();
   }, [addToast, fetchRecords]);
 
+  // Loading state (Google Workspace styled)
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 mx-auto mb-4">
-            <div className="w-16 h-16 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin"></div>
-          </div>
-          <p className="text-gray-600 font-medium">Loading RKD Gmail...</p>
+      <div className="min-h-screen bg-[#f6f8fc] flex flex-col items-center justify-center p-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="https://static.wixstatic.com/media/68b92a_d71e34133826499983234774dea1945b~mv2.png/v1/fill/w_186,h_156,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/RKD-Logo.png"
+          alt="RKD Logo"
+          className="h-12 w-auto mb-6 object-contain"
+        />
+        <div className="w-48 h-1 bg-[#e0e2e6] rounded-full overflow-hidden">
+          <div className="h-full bg-[#0b57d0] animate-pulse rounded-full w-2/3"></div>
         </div>
+        <p className="text-xs text-[#747775] font-medium mt-4 tracking-wide">
+          Loading Gmail Leads Extractor...
+        </p>
       </div>
     );
   }
 
+  // Not signed in -> Show Google Material 3 Login Screen
   if (!session) {
     return <LoginScreen />;
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
+    <div className="h-screen w-screen flex flex-col bg-[#f6f8fc] overflow-hidden select-none font-sans">
+      {/* Top Header */}
       <Header
         session={session}
-        onMenuClick={() => setIsMobileNavOpen(!isMobileNavOpen)}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onMenuToggle={() => setIsMobileNavOpen(!isMobileNavOpen)}
         onSignOut={() => signOut()}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      {/* Main Workspace */}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Left Sidebar */}
         <Sidebar
           activeView={activeView}
           onViewChange={(view) => {
             setActiveView(view);
-            setIsMobileNavOpen(false);
+            if (view === 'compose') setIsComposeOpen(true);
           }}
-          onCompose={() => {
+          onComposeClick={() => {
+            setIsComposeOpen(true);
             setActiveView('compose');
-            setIsMobileNavOpen(false);
           }}
           isOpen={isMobileNavOpen}
           onClose={() => setIsMobileNavOpen(false)}
           recordCount={records.length}
         />
 
-        <main className="flex-1 overflow-auto">
-          <div className="max-w-5xl mx-auto px-4 py-6">
-            {activeView === 'compose' && (
-              <ComposeWindow
-                session={session}
-                onSent={handleEmailSent}
-                onError={(msg) => addToast(msg, 'error')}
-              />
-            )}
-            {activeView === 'sent' && (
+        {/* Center / Right Content Panel */}
+        <main className="flex-1 overflow-auto p-2 sm:p-4 md:p-6 bg-[#f6f8fc]">
+          <div className="h-full max-w-7xl mx-auto flex flex-col">
+            {/* When viewing Sent Log or in background */}
+            <div className="flex-1 flex flex-col">
               <SentLog
                 records={records}
                 loading={recordsLoading}
                 onRefresh={fetchRecords}
+                onComposeClick={() => setIsComposeOpen(true)}
               />
+            </div>
+
+            {/* Desktop / Mobile Inline Compose if activeView is compose and not floating */}
+            {activeView === 'compose' && !isComposeOpen && (
+              <div className="mt-4">
+                <ComposeWindow
+                  session={session}
+                  onSent={handleEmailSent}
+                  onError={(msg) => addToast(msg, 'error')}
+                  onClose={() => setActiveView('sent')}
+                />
+              </div>
             )}
           </div>
         </main>
+
+        {/* Gmail-Style Floating Compose Window (Bottom Right) */}
+        {isComposeOpen && (
+          <ComposeWindow
+            session={session}
+            isFloating={true}
+            onSent={handleEmailSent}
+            onError={(msg) => addToast(msg, 'error')}
+            onClose={() => {
+              setIsComposeOpen(false);
+              if (activeView === 'compose') setActiveView('sent');
+            }}
+          />
+        )}
       </div>
 
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 items-center pointer-events-none">
+      {/* Toasts (Gmail Snackbars) */}
+      <div className="fixed bottom-6 left-6 z-50 flex flex-col gap-2 items-start pointer-events-none">
         {toasts.map((toast) => (
           <Toast
             key={toast.id}
@@ -141,6 +179,7 @@ export default function Home() {
         ))}
       </div>
 
+      {/* PWA Mobile Install Banner */}
       <InstallBanner />
     </div>
   );

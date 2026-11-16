@@ -1,66 +1,85 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap');
+@layer base {
+  :root {
+    --google-blue: #0b57d0;
+    --google-blue-hover: #105dc1;
+    --google-blue-light: #c2e7ff;
+    --google-blue-text: #001d35;
+    --google-bg: #f6f8fc;
+    --google-surface: #ffffff;
+    --google-border: #dadce0;
+    --google-border-subtle: #e0e2e6;
+    --google-text: #1f1f1f;
+    --google-text-secondary: #444746;
+    --google-text-tertiary: #747775;
+    --google-hover: #eaf1fb;
+  }
 
-:root {
-  --gmail-blue: #1a73e8;
-  --gmail-blue-dark: #1557b0;
-  --gmail-red: #d93025;
-  --gmail-gray: #5f6368;
-  --gmail-border: #dadce0;
-  --rkd-red: #c8102e;
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #f6f8fc;
+    color: #1f1f1f;
+    font-family: 'Google Sans', Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-* {
-  box-sizing: border-box;
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #bdc1c6;
 }
 
-html, body {
-  height: 100%;
-  font-family: 'Google Sans', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #f6f8fc;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c4c7cc; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #9aa0a6; }
-
-/* Toast animation */
-@keyframes slide-up {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-.animate-slide-up { animation: slide-up 0.3s ease-out; }
-
-/* Fade in */
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.animate-fade-in { animation: fade-in 0.2s ease-out; }
-
-/* contenteditable placeholder */
+/* Compose Editor Placeholder */
 [contenteditable][data-placeholder]:empty:before {
   content: attr(data-placeholder);
-  color: #9aa0a6;
+  color: #747775;
   pointer-events: none;
   font-style: normal;
 }
 
-/* Focus ring */
-*:focus-visible {
-  outline: 2px solid #1a73e8;
-  outline-offset: 2px;
+/* Animations */
+@keyframes slideUpFade {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-slide-up-fade {
+  animation: slideUpFade 0.2s cubic-bezier(0, 0, 0.2, 1);
 }
 
-/* Safe area bottom for mobile */
-.safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+@keyframes toastSlideUp {
+  from {
+    transform: translate(-50%, 20px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
 }
-
-/* Active scale */
-.active\:scale-98:active { transform: scale(0.98); }
+.animate-toast {
+  animation: toastSlideUp 0.25s cubic-bezier(0, 0, 0.2, 1);
+}
