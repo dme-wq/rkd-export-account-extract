@@ -34,6 +34,9 @@ export async function POST(req: NextRequest) {
       firstName,
       lastName,
       attachments = [],
+      isReply = false,
+      threadId,
+      inReplyTo,
     } = body;
 
     // Normalize recipients
@@ -67,54 +70,57 @@ export async function POST(req: NextRequest) {
 
     // =========================================================================
     // 🛑 1. DUPLICATE EMAIL CHECK: PREVENT SENDING TO ALREADY MAILED RECIPIENTS
+    // (Bypassed if user is sending a Reply in an existing conversation/lead)
     // =========================================================================
     let targetSheet = 'Gmail';
-    try {
-      const meta = await sheets.spreadsheets.get({ spreadsheetId });
-      const sheetsList = meta.data.sheets || [];
-      const foundSheet = sheetsList.find(
-        (s) => s.properties?.title?.toLowerCase() === 'gmail'
-      );
-      if (foundSheet && foundSheet.properties?.title) {
-        targetSheet = foundSheet.properties.title;
-      } else if (sheetsList[0]?.properties?.title) {
-        targetSheet = sheetsList[0].properties.title;
+    if (!isReply) {
+      try {
+        const meta = await sheets.spreadsheets.get({ spreadsheetId });
+        const sheetsList = meta.data.sheets || [];
+        const foundSheet = sheetsList.find(
+          (s) => s.properties?.title?.toLowerCase() === 'gmail'
+        );
+        if (foundSheet && foundSheet.properties?.title) {
+          targetSheet = foundSheet.properties.title;
+        } else if (sheetsList[0]?.properties?.title) {
+          targetSheet = sheetsList[0].properties.title;
+        }
+      } catch (e) {
+        console.warn('Could not inspect sheet titles for duplicate check:', e);
       }
-    } catch (e) {
-      console.warn('Could not inspect sheet titles for duplicate check:', e);
-    }
 
-    try {
-      const existingSheetData = await sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: `${targetSheet}!C2:C`,
-      });
-      const existingRows = existingSheetData.data.values || [];
-      const existingEmailSet = new Set<string>();
+      try {
+        const existingSheetData = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `${targetSheet}!C2:C`,
+        });
+        const existingRows = existingSheetData.data.values || [];
+        const existingEmailSet = new Set<string>();
 
-      for (const row of existingRows) {
-        if (row[0]) {
-          const splitEmails = String(row[0]).split(/[,;\s]+/);
-          for (const em of splitEmails) {
-            const clean = em.trim().toLowerCase();
-            if (clean) existingEmailSet.add(clean);
+        for (const row of existingRows) {
+          if (row[0]) {
+            const splitEmails = String(row[0]).split(/[,;\s]+/);
+            for (const em of splitEmails) {
+              const clean = em.trim().toLowerCase();
+              if (clean) existingEmailSet.add(clean);
+            }
           }
         }
-      }
 
-      for (const recipient of toList) {
-        if (existingEmailSet.has(recipient.toLowerCase().trim())) {
-          return NextResponse.json(
-            {
-              error: `Aapne is email ID (${recipient}) par already mail bhej diya hai! Duplicate email bhejna allowed nahi hai.`,
-              duplicateEmail: recipient,
-            },
-            { status: 400 }
-          );
+        for (const recipient of toList) {
+          if (existingEmailSet.has(recipient.toLowerCase().trim())) {
+            return NextResponse.json(
+              {
+                error: `Aapne is email ID (${recipient}) par already mail bhej diya hai! Duplicate email bhejna allowed nahi hai.`,
+                duplicateEmail: recipient,
+              },
+              { status: 400 }
+            );
+          }
         }
+      } catch (dupCheckErr) {
+        console.warn('Warning during duplicate email check:', dupCheckErr);
       }
-    } catch (dupCheckErr) {
-      console.warn('Warning during duplicate email check:', dupCheckErr);
     }
 
     // 1. Recipient Signature & Company Extraction (DO NOT log sender's signature into sheet!)
@@ -204,18 +210,22 @@ export async function POST(req: NextRequest) {
       subject: subject.trim(),
       htmlBody: emailBody,
       attachments,
+      inReplyTo,
     });
 
     // 2. Send the email via Gmail API
     let messageId: string | undefined;
+    let sentThreadId: string | undefined;
     try {
       const sendRes = await gmail.users.messages.send({
         userId: 'me',
         requestBody: {
           raw: rawEncodedEmail,
+          threadId: threadId || undefined,
         },
       });
       messageId = sendRes.data.id || undefined;
+      sentThreadId = sendRes.data.threadId || threadId || undefined;
     } catch (gmailErr: unknown) {
       console.error('Gmail send error:', gmailErr);
       const msg = gmailErr instanceof Error ? gmailErr.message : 'Unknown Gmail error';
@@ -283,9 +293,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       messageId,
+      threadId: sentThreadId,
       emailSent: true,
       sheetsLogged: sheetsSuccess,
-      message: sheetNote || 'Email sent and recipient details logged to Google Sheets with AI Smart Extraction!',
+      message: isReply ? 'Reply sent successfully in this conversation!' : (sheetNote || 'Email sent and recipient details logged to Google Sheets with AI Smart Extraction!'),
       lead: {
         firstName: finalFirstName,
         lastName: finalLastName,
@@ -390,6 +401,7 @@ function buildRawEmailWithAttachments({
   subject,
   htmlBody,
   attachments = [],
+  inReplyTo,
 }: {
   from: string;
   to: string[];
@@ -398,6 +410,7 @@ function buildRawEmailWithAttachments({
   subject: string;
   htmlBody: string;
   attachments?: EmailAttachmentPayload[];
+  inReplyTo?: string;
 }): string {
   const headers: string[] = [];
 
@@ -410,6 +423,11 @@ function buildRawEmailWithAttachments({
 
   if (bcc.length > 0) {
     headers.push(`Bcc: ${bcc.join(', ')}`);
+  }
+
+  if (inReplyTo) {
+    headers.push(`In-Reply-To: ${inReplyTo}`);
+    headers.push(`References: ${inReplyTo}`);
   }
 
   // RFC 2047 encoded subject
