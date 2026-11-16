@@ -7,7 +7,7 @@ import {
   Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
   Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
-  Sparkles, Check, UserCheck
+  Sparkles, Check, UserCheck, Loader2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
@@ -41,6 +41,8 @@ export function ComposeWindow({
   const [subject, setSubject] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [isLookingUpName, setIsLookingUpName] = useState(false);
+  const [nameSource, setNameSource] = useState<string | null>(null);
   const [hasManuallyEditedName, setHasManuallyEditedName] = useState(false);
 
   // Signature
@@ -58,32 +60,43 @@ export function ComposeWindow({
   const bodyRef = useRef<HTMLDivElement>(null);
   const toInputRef = useRef<HTMLInputElement>(null);
 
-  // REALTIME NAME EXTRACTION: Runs whenever To input or chips change!
-  const updateExtractedNames = useCallback((raw: string) => {
-    if (hasManuallyEditedName) return; // Respect manual user edits
-    if (!raw.trim()) return;
+  // Query server API (/api/lookup-name) to fetch ACTUAL Google Profile Name from Gmail history & People API
+  const lookupActualGoogleName = useCallback(async (email: string) => {
+    if (!email || !email.includes('@')) return;
+    if (hasManuallyEditedName) return;
 
-    const res = extractNameFromEmail(raw);
-    if (res.firstName || res.lastName) {
-      if (res.firstName) setFirstName(res.firstName);
-      if (res.lastName) setLastName(res.lastName);
+    // Instant local heuristic preview first
+    const instant = extractNameFromEmail(email);
+    if (!firstName && !lastName) {
+      if (instant.firstName) setFirstName(instant.firstName);
+      if (instant.lastName) setLastName(instant.lastName);
     }
-  }, [hasManuallyEditedName]);
+
+    // Now query Gmail API & People API on server for the real Google Profile Name!
+    setIsLookingUpName(true);
+    try {
+      const res = await fetch(`/api/lookup-name?email=${encodeURIComponent(email)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && (data.firstName || data.lastName)) {
+          setFirstName(data.firstName || '');
+          setLastName(data.lastName || '');
+          setNameSource(data.source);
+        }
+      }
+    } catch (err) {
+      console.warn('Realtime name lookup error:', err);
+    } finally {
+      setIsLookingUpName(false);
+    }
+  }, [hasManuallyEditedName, firstName, lastName]);
 
   // When To chips change
   useEffect(() => {
     if (toChips.length > 0 && !hasManuallyEditedName) {
-      updateExtractedNames(toChips[0]);
+      lookupActualGoogleName(toChips[0]);
     }
-  }, [toChips, hasManuallyEditedName, updateExtractedNames]);
-
-  // When typing into To input
-  const handleToInputChange = (val: string) => {
-    setToInput(val);
-    if (!hasManuallyEditedName && val.length > 2) {
-      updateExtractedNames(val);
-    }
-  };
+  }, [toChips, hasManuallyEditedName, lookupActualGoogleName]);
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -101,7 +114,7 @@ export function ComposeWindow({
       if (parsed.length > 0) {
         setToChips((prev) => [...prev, ...parsed]);
         setToInput('');
-        updateExtractedNames(parsed[0]);
+        lookupActualGoogleName(parsed[0]);
       }
     } else if (e.key === 'Backspace' && !toInput && toChips.length > 0) {
       setToChips((prev) => prev.slice(0, -1));
@@ -143,15 +156,6 @@ export function ComposeWindow({
       return;
     }
 
-    // Auto extract names if user didn't enter them
-    let resolvedFirstName = firstName.trim();
-    let resolvedLastName = lastName.trim();
-    if (!resolvedFirstName && !resolvedLastName && finalTo[0]) {
-      const auto = extractNameFromEmail(finalTo[0]);
-      resolvedFirstName = auto.firstName;
-      resolvedLastName = auto.lastName;
-    }
-
     setSending(true);
     try {
       const formattedSignatureHtml = includeSignature && signature ? `
@@ -173,8 +177,8 @@ export function ComposeWindow({
         subject: subject.trim(),
         body: messageHtml + formattedSignatureHtml,
         signature: includeSignature ? signature : '',
-        firstName: resolvedFirstName,
-        lastName: resolvedLastName,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
       };
 
       const res = await fetch('/api/send-email', {
@@ -199,6 +203,7 @@ export function ComposeWindow({
       setFirstName('');
       setLastName('');
       setHasManuallyEditedName(false);
+      setNameSource(null);
       setShowCc(false);
       setShowBcc(false);
       if (bodyRef.current) bodyRef.current.innerHTML = '';
@@ -294,7 +299,7 @@ export function ComposeWindow({
                 ref={toInputRef}
                 type="text"
                 value={toInput}
-                onChange={(e) => handleToInputChange(e.target.value)}
+                onChange={(e) => setToInput(e.target.value)}
                 onKeyDown={handleToKeyDown}
                 onBlur={() => {
                   if (toInput.trim()) {
@@ -302,11 +307,11 @@ export function ComposeWindow({
                     if (parsed.length > 0) {
                       setToChips((prev) => [...prev, ...parsed]);
                       setToInput('');
-                      updateExtractedNames(parsed[0]);
+                      lookupActualGoogleName(parsed[0]);
                     }
                   }
                 }}
-                placeholder={toChips.length === 0 ? 'Recipients (e.g. lucky.saini@rkd.in)' : ''}
+                placeholder={toChips.length === 0 ? 'Recipients (e.g. luckyknhn@gmail.com)' : ''}
                 className="flex-1 min-w-[140px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
               />
             </div>
@@ -443,11 +448,19 @@ export function ComposeWindow({
             />
           </div>
 
-          {/* 6. PROMINENT REALTIME LEAD EXTRACTION BAR (Directly Visible) */}
+          {/* 6. GOOGLE ACCOUNT PROFILE NAME & SHEETS LEAD BAR */}
           <div className="bg-[#f8fafd] border-b border-[#dadce0] px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 flex-1 min-w-[260px]">
-              <UserCheck size={15} className="text-[#0b57d0] flex-shrink-0" />
-              <span className="font-semibold text-[#1f1f1f]">Lead Contact:</span>
+            <div className="flex items-center gap-2 flex-1 min-w-[300px]">
+              <div className="w-5 h-5 rounded-full bg-[#c2e7ff] text-[#001d35] flex items-center justify-center flex-shrink-0">
+                {isLookingUpName ? (
+                  <Loader2 size={12} className="animate-spin text-[#0b57d0]" />
+                ) : (
+                  <UserCheck size={13} className="text-[#0b57d0]" />
+                )}
+              </div>
+
+              <span className="font-semibold text-[#1f1f1f]">Google Account Name:</span>
+
               <div className="flex items-center gap-1.5 flex-1">
                 <input
                   type="text"
@@ -456,8 +469,8 @@ export function ComposeWindow({
                     setFirstName(e.target.value);
                     setHasManuallyEditedName(true);
                   }}
-                  placeholder="First Name"
-                  className="w-28 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2 py-1 text-xs text-[#1f1f1f] outline-none"
+                  placeholder="First Name (Col A)"
+                  className="w-32 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2.5 py-1 text-xs text-[#1f1f1f] font-medium outline-none shadow-2xs"
                   title="First Name (Logs to Google Sheet Column A)"
                 />
                 <input
@@ -467,16 +480,29 @@ export function ComposeWindow({
                     setLastName(e.target.value);
                     setHasManuallyEditedName(true);
                   }}
-                  placeholder="Last Name"
-                  className="w-28 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2 py-1 text-xs text-[#1f1f1f] outline-none"
+                  placeholder="Last Name (Col B)"
+                  className="w-32 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2.5 py-1 text-xs text-[#1f1f1f] font-medium outline-none shadow-2xs"
                   title="Last Name (Logs to Google Sheet Column B)"
                 />
+
+                {isLookingUpName && (
+                  <span className="text-[11px] text-[#0b57d0] animate-pulse">
+                    Fetching Google Profile...
+                  </span>
+                )}
               </div>
             </div>
 
-            <span className="text-[11px] text-[#1e8e3e] font-medium bg-[#e6f4ea] px-2 py-0.5 rounded-full border border-[#ceead6]">
-              ✓ Auto-logs to Sheets: Gmail!A:F
-            </span>
+            <div className="flex items-center gap-2">
+              {nameSource === 'gmail-history' && (
+                <span className="text-[11px] text-[#137333] bg-[#e6f4ea] px-2 py-0.5 rounded-full font-medium">
+                  ✓ Verified Google Profile
+                </span>
+              )}
+              <span className="text-[11px] text-[#5f6368] hidden sm:inline">
+                Sheet: <strong>Gmail!A:F</strong>
+              </span>
+            </div>
           </div>
 
           {/* 7. Editable Message Canvas */}

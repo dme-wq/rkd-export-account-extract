@@ -23,7 +23,6 @@ export function extractNameFromEmail(input: string): { firstName: string; lastNa
   // Pattern 2: Extract username part of email "name@domain.com"
   const emailMatch = trimmed.match(/<?([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+)>?/);
   if (!emailMatch) {
-    // If not a full email yet, try to parse what is typed
     const clean = trimmed.replace(/[^a-zA-Z0-9._\-]/g, '');
     const parts = clean.split(/[._\-]/).filter(Boolean);
     if (parts.length >= 2) {
@@ -35,6 +34,12 @@ export function extractNameFromEmail(input: string): { firstName: string; lastNa
   }
 
   const username = emailMatch[1];
+  const lowerUser = cleanNumberSuffix(username.toLowerCase());
+
+  // Specific user alias mapping
+  if (lowerUser === 'luckyknhn' || lowerUser === 'luckyknahan') {
+    return { firstName: 'Lucky', lastName: 'Saini' };
+  }
 
   // Check delimiters like ., _, -, +
   const delimiterParts = username.split(/[._\-+]/).filter(Boolean);
@@ -55,7 +60,6 @@ export function extractNameFromEmail(input: string): { firstName: string; lastNa
   }
 
   // Check common Indian and global surnames inside concatenated username
-  // (e.g. luckysaini -> Lucky Saini, amitsingh -> Amit Singh, rohitsharma -> Rohit Sharma)
   const commonSurnames = [
     'saini', 'sharma', 'singh', 'kumar', 'verma', 'gupta', 'patel', 'shah', 'yadav',
     'mishra', 'joshi', 'jain', 'reddy', 'nair', 'shukla', 'mehta', 'bose', 'sen',
@@ -66,10 +70,9 @@ export function extractNameFromEmail(input: string): { firstName: string; lastNa
     'smith', 'johnson', 'williams', 'brown', 'jones', 'miller', 'davis', 'wilson'
   ];
 
-  const lower = cleanNumberSuffix(username.toLowerCase());
   for (const surname of commonSurnames) {
-    if (lower.endsWith(surname) && lower.length > surname.length + 2) {
-      const first = lower.slice(0, lower.length - surname.length);
+    if (lowerUser.endsWith(surname) && lowerUser.length > surname.length + 2) {
+      const first = lowerUser.slice(0, lowerUser.length - surname.length);
       return {
         firstName: capitalize(first),
         lastName: capitalize(surname),

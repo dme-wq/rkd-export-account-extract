@@ -43,16 +43,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email body is required.' }, { status: 400 });
     }
 
-    // Determine First & Last Name
-    let finalFirstName = (firstName || '').trim();
-    let finalLastName = (lastName || '').trim();
-
-    if (!finalFirstName && !finalLastName && toList[0]) {
-      const extracted = extractNameFromEmail(toList[0]);
-      finalFirstName = extracted.firstName;
-      finalLastName = extracted.lastName;
-    }
-
     // Setup Google OAuth2 client
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
@@ -62,6 +52,29 @@ export async function POST(req: NextRequest) {
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const userEmail = session.user?.email || 'me';
+
+    // Determine First & Last Name
+    let finalFirstName = (firstName || '').trim();
+    let finalLastName = (lastName || '').trim();
+
+    // If either First Name or Last Name is missing or looks like an email prefix, query Gmail/People API for the actual Google Name
+    if ((!finalFirstName || !finalLastName || finalFirstName.toLowerCase() === toList[0].split('@')[0].toLowerCase()) && toList[0]) {
+      const actualGoogleName = await resolveActualGoogleName({
+        gmail,
+        oauth2Client,
+        email: toList[0],
+      });
+
+      if (actualGoogleName.firstName) finalFirstName = actualGoogleName.firstName;
+      if (actualGoogleName.lastName) finalLastName = actualGoogleName.lastName;
+    }
+
+    // Fallback if still empty
+    if (!finalFirstName && !finalLastName && toList[0]) {
+      const extracted = extractNameFromEmail(toList[0]);
+      finalFirstName = extracted.firstName;
+      finalLastName = extracted.lastName;
+    }
 
     // Build raw MIME RFC 2822 email
     const rawEncodedEmail = buildRawEmail({
@@ -94,7 +107,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Log to Google Sheets
+    // 2. Log to Google Sheets (Col A: First Name, Col B: Last Name, Col C: Email, Col D: CC, Col E: BCC, Col F: Signature)
     let sheetsSuccess = false;
     let sheetNote = '';
 
@@ -136,6 +149,94 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// Looks up actual Google Account name from Gmail headers and People API
+async function resolveActualGoogleName({
+  gmail,
+  oauth2Client,
+  email,
+}: {
+  gmail: ReturnType<typeof google.gmail>;
+  oauth2Client: InstanceType<typeof google.auth.OAuth2>;
+  email: string;
+}): Promise<{ firstName: string; lastName: string }> {
+  const targetEmail = email.trim().toLowerCase();
+
+  // 1. Search Gmail messages for any headers with this email
+  try {
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: targetEmail,
+      maxResults: 6,
+    });
+
+    const messages = listRes.data.messages || [];
+    for (const msgRef of messages) {
+      if (!msgRef.id) continue;
+      const msg = await gmail.users.messages.get({
+        userId: 'me',
+        id: msgRef.id,
+        format: 'metadata',
+        metadataHeaders: ['From', 'To', 'Cc'],
+      });
+
+      const headers = msg.data.payload?.headers || [];
+      for (const h of headers) {
+        const val = h.value || '';
+        if (val.toLowerCase().includes(targetEmail)) {
+          // Parse: "Lucky Saini <luckyknhn@gmail.com>"
+          const match = val.match(/(.*?)\s*<([^\s>]+)>/);
+          if (match) {
+            const rawName = match[1].replace(/["']/g, '').trim();
+            const emailInHeader = match[2].trim().toLowerCase();
+            if (emailInHeader === targetEmail && rawName && !rawName.includes('@')) {
+              const parts = rawName.split(/\s+/).filter(Boolean);
+              if (parts.length >= 2) {
+                return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+              } else if (parts.length === 1) {
+                return { firstName: parts[0], lastName: '' };
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Gmail name lookup in send-email error:', err);
+  }
+
+  // 2. Try Google People API (otherContacts)
+  try {
+    const people = google.people({ version: 'v1', auth: oauth2Client });
+    const otherRes = await people.otherContacts.search({
+      query: targetEmail,
+      readMask: 'names,emailAddresses',
+    });
+
+    const results = otherRes.data.results || [];
+    if (results.length > 0 && results[0].person?.names) {
+      const nameObj = results[0].person.names[0];
+      const given = nameObj.givenName || '';
+      const family = nameObj.familyName || '';
+      const display = nameObj.displayName || '';
+
+      if (given || family) {
+        return { firstName: given, lastName: family };
+      } else if (display) {
+        const parts = display.split(/\s+/).filter(Boolean);
+        return {
+          firstName: parts[0] || '',
+          lastName: parts.slice(1).join(' ') || '',
+        };
+      }
+    }
+  } catch (peopleErr) {
+    console.warn('People lookup in send-email error:', peopleErr);
+  }
+
+  // Fallback
+  return { firstName: '', lastName: '' };
+}
+
 // Convert string / array into clean email array
 function normalizeEmailList(input: unknown): string[] {
   if (!input) return [];
@@ -145,7 +246,7 @@ function normalizeEmailList(input: unknown): string[] {
   if (typeof input === 'string') {
     return input
       .split(/[,;\s]+/)
-      .map((e) => e.trim())
+      .map((e) => e.trim().replace(/^<|>$/g, ''))
       .filter((e) => isValidEmail(e));
   }
   return [];
