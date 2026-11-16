@@ -1,15 +1,16 @@
 'use client';
 
 import { Session } from 'next-auth';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, ChevronDown, X, Minus, Maximize2, Minimize2,
   Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
   Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
-  Sparkles, Check
+  Sparkles, Check, UserCheck
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { extractNameFromEmail } from '@/lib/nameExtractor';
 
 interface ComposeWindowProps {
   session: Session;
@@ -40,7 +41,7 @@ export function ComposeWindow({
   const [subject, setSubject] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [isLeadInfoOpen, setIsLeadInfoOpen] = useState(false);
+  const [hasManuallyEditedName, setHasManuallyEditedName] = useState(false);
 
   // Signature
   const defaultSignature = `Lucky Saini\nData Management Expert\nIT | RKD Furnishings Pvt Ltd\n+91 98828 30548 | +91 70182 18843\nwww.rkd.in`;
@@ -57,30 +58,50 @@ export function ComposeWindow({
   const bodyRef = useRef<HTMLDivElement>(null);
   const toInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto extract First & Last Name from To email
-  useEffect(() => {
-    if (toChips.length > 0 && !firstName && !lastName) {
-      const email = toChips[0];
-      const local = email.split('@')[0];
-      const parts = local.split(/[._-]/);
-      if (parts.length >= 2) {
-        setFirstName(parts[0].charAt(0).toUpperCase() + parts[0].slice(1));
-        setLastName(parts[1].charAt(0).toUpperCase() + parts[1].slice(1));
-      } else if (parts.length === 1) {
-        setFirstName(parts[0].charAt(0).toUpperCase() + parts[0].slice(1));
-      }
+  // REALTIME NAME EXTRACTION: Runs whenever To input or chips change!
+  const updateExtractedNames = useCallback((raw: string) => {
+    if (hasManuallyEditedName) return; // Respect manual user edits
+    if (!raw.trim()) return;
+
+    const res = extractNameFromEmail(raw);
+    if (res.firstName || res.lastName) {
+      if (res.firstName) setFirstName(res.firstName);
+      if (res.lastName) setLastName(res.lastName);
     }
-  }, [toChips, firstName, lastName]);
+  }, [hasManuallyEditedName]);
+
+  // When To chips change
+  useEffect(() => {
+    if (toChips.length > 0 && !hasManuallyEditedName) {
+      updateExtractedNames(toChips[0]);
+    }
+  }, [toChips, hasManuallyEditedName, updateExtractedNames]);
+
+  // When typing into To input
+  const handleToInputChange = (val: string) => {
+    setToInput(val);
+    if (!hasManuallyEditedName && val.length > 2) {
+      updateExtractedNames(val);
+    }
+  };
 
   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const parseInputEmails = (text: string): string[] => {
+    return text
+      .split(/[,;\s]+/)
+      .map((e) => e.trim().replace(/^<|>$/g, ''))
+      .filter((e) => isValidEmail(e));
+  };
 
   const handleToKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if ((e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') && toInput.trim()) {
       e.preventDefault();
-      const clean = toInput.trim().replace(/,$/, '');
-      if (isValidEmail(clean)) {
-        setToChips((prev) => [...prev, clean]);
+      const parsed = parseInputEmails(toInput);
+      if (parsed.length > 0) {
+        setToChips((prev) => [...prev, ...parsed]);
         setToInput('');
+        updateExtractedNames(parsed[0]);
       }
     } else if (e.key === 'Backspace' && !toInput && toChips.length > 0) {
       setToChips((prev) => prev.slice(0, -1));
@@ -93,21 +114,26 @@ export function ComposeWindow({
   };
 
   const handleSend = async () => {
-    // Validate
-    const finalTo = [...toChips];
-    if (toInput.trim() && isValidEmail(toInput.trim())) {
-      finalTo.push(toInput.trim());
-      setToInput('');
-    }
+    // 1. Gather all To emails (both chips AND any pending text in input)
+    const pendingTo = parseInputEmails(toInput);
+    const finalTo = Array.from(new Set([...toChips, ...pendingTo]));
+
+    // 2. Gather all CC emails
+    const pendingCc = parseInputEmails(ccInput);
+    const finalCc = Array.from(new Set([...ccChips, ...pendingCc]));
+
+    // 3. Gather all BCC emails
+    const pendingBcc = parseInputEmails(bccInput);
+    const finalBcc = Array.from(new Set([...bccChips, ...pendingBcc]));
 
     if (finalTo.length === 0) {
-      onError('Please specify at least one recipient.');
+      onError('Please specify at least one valid recipient (To) email address.');
       toInputRef.current?.focus();
       return;
     }
 
     if (!subject.trim()) {
-      onError('Please add a subject for your message.');
+      onError('Please add a subject for your email.');
       return;
     }
 
@@ -115,6 +141,15 @@ export function ComposeWindow({
     if (!messageHtml.trim() || messageHtml === '<br>') {
       onError('Please compose a message before sending.');
       return;
+    }
+
+    // Auto extract names if user didn't enter them
+    let resolvedFirstName = firstName.trim();
+    let resolvedLastName = lastName.trim();
+    if (!resolvedFirstName && !resolvedLastName && finalTo[0]) {
+      const auto = extractNameFromEmail(finalTo[0]);
+      resolvedFirstName = auto.firstName;
+      resolvedLastName = auto.lastName;
     }
 
     setSending(true);
@@ -133,13 +168,13 @@ export function ComposeWindow({
 
       const payload = {
         to: finalTo,
-        cc: ccChips.length > 0 ? ccChips : undefined,
-        bcc: bccChips.length > 0 ? bccChips : undefined,
-        subject,
+        cc: finalCc.length > 0 ? finalCc : undefined,
+        bcc: finalBcc.length > 0 ? finalBcc : undefined,
+        subject: subject.trim(),
         body: messageHtml + formattedSignatureHtml,
         signature: includeSignature ? signature : '',
-        firstName,
-        lastName,
+        firstName: resolvedFirstName,
+        lastName: resolvedLastName,
       };
 
       const res = await fetch('/api/send-email', {
@@ -149,11 +184,11 @@ export function ComposeWindow({
       });
 
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to send message');
       }
 
-      // Success
+      // Reset Form on Success
       setToChips([]);
       setToInput('');
       setCcChips([]);
@@ -163,6 +198,7 @@ export function ComposeWindow({
       setSubject('');
       setFirstName('');
       setLastName('');
+      setHasManuallyEditedName(false);
       setShowCc(false);
       setShowBcc(false);
       if (bodyRef.current) bodyRef.current.innerHTML = '';
@@ -170,6 +206,7 @@ export function ComposeWindow({
       onSent();
       if (onClose) onClose();
     } catch (err: unknown) {
+      console.error('Send error:', err);
       onError(err instanceof Error ? err.message : 'Error sending email');
     } finally {
       setSending(false);
@@ -187,7 +224,7 @@ export function ComposeWindow({
             ? 'fixed inset-4 z-50 rounded-2xl'
             : isMinimized
               ? 'fixed bottom-0 right-4 sm:right-10 w-72 h-10 shadow-lg'
-              : 'fixed bottom-0 right-4 sm:right-10 w-[calc(100vw-32px)] sm:w-[620px] max-h-[85vh] h-[640px]'
+              : 'fixed bottom-0 right-4 sm:right-10 w-[calc(100vw-32px)] sm:w-[640px] max-h-[85vh] h-[660px]'
           : 'w-full max-w-4xl mx-auto my-2 rounded-2xl border'
       )}
     >
@@ -257,10 +294,20 @@ export function ComposeWindow({
                 ref={toInputRef}
                 type="text"
                 value={toInput}
-                onChange={(e) => setToInput(e.target.value)}
+                onChange={(e) => handleToInputChange(e.target.value)}
                 onKeyDown={handleToKeyDown}
-                placeholder={toChips.length === 0 ? 'Recipients' : ''}
-                className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
+                onBlur={() => {
+                  if (toInput.trim()) {
+                    const parsed = parseInputEmails(toInput);
+                    if (parsed.length > 0) {
+                      setToChips((prev) => [...prev, ...parsed]);
+                      setToInput('');
+                      updateExtractedNames(parsed[0]);
+                    }
+                  }
+                }}
+                placeholder={toChips.length === 0 ? 'Recipients (e.g. lucky.saini@rkd.in)' : ''}
+                className="flex-1 min-w-[140px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
               />
             </div>
 
@@ -270,7 +317,7 @@ export function ComposeWindow({
                 <button
                   type="button"
                   onClick={() => setShowCc(true)}
-                  className="hover:text-[#1f1f1f] hover:underline"
+                  className="hover:text-[#0b57d0] hover:underline"
                 >
                   Cc
                 </button>
@@ -279,7 +326,7 @@ export function ComposeWindow({
                 <button
                   type="button"
                   onClick={() => setShowBcc(true)}
-                  className="hover:text-[#1f1f1f] hover:underline"
+                  className="hover:text-[#0b57d0] hover:underline"
                 >
                   Bcc
                 </button>
@@ -313,13 +360,23 @@ export function ComposeWindow({
                   onKeyDown={(e) => {
                     if ((e.key === 'Enter' || e.key === ',') && ccInput.trim()) {
                       e.preventDefault();
-                      if (isValidEmail(ccInput.trim())) {
-                        setCcChips([...ccChips, ccInput.trim()]);
+                      const parsed = parseInputEmails(ccInput);
+                      if (parsed.length > 0) {
+                        setCcChips((prev) => [...prev, ...parsed]);
                         setCcInput('');
                       }
                     }
                   }}
-                  placeholder={ccChips.length === 0 ? 'Carbon copy' : ''}
+                  onBlur={() => {
+                    if (ccInput.trim()) {
+                      const parsed = parseInputEmails(ccInput);
+                      if (parsed.length > 0) {
+                        setCcChips((prev) => [...prev, ...parsed]);
+                        setCcInput('');
+                      }
+                    }
+                  }}
+                  placeholder={ccChips.length === 0 ? 'Carbon copy (comma separated)' : ''}
                   className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
                 />
               </div>
@@ -352,13 +409,23 @@ export function ComposeWindow({
                   onKeyDown={(e) => {
                     if ((e.key === 'Enter' || e.key === ',') && bccInput.trim()) {
                       e.preventDefault();
-                      if (isValidEmail(bccInput.trim())) {
-                        setBccChips([...bccChips, bccInput.trim()]);
+                      const parsed = parseInputEmails(bccInput);
+                      if (parsed.length > 0) {
+                        setBccChips((prev) => [...prev, ...parsed]);
                         setBccInput('');
                       }
                     }
                   }}
-                  placeholder={bccChips.length === 0 ? 'Blind carbon copy' : ''}
+                  onBlur={() => {
+                    if (bccInput.trim()) {
+                      const parsed = parseInputEmails(bccInput);
+                      if (parsed.length > 0) {
+                        setBccChips((prev) => [...prev, ...parsed]);
+                        setBccInput('');
+                      }
+                    }
+                  }}
+                  placeholder={bccChips.length === 0 ? 'Blind carbon copy (comma separated)' : ''}
                   className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
                 />
               </div>
@@ -376,49 +443,41 @@ export function ComposeWindow({
             />
           </div>
 
-          {/* 6. Google Sheets Lead Extractor Info Bar (Collapsible) */}
-          <div className="bg-[#f8fafd] border-b border-[#e0e2e6] px-4 py-1.5 text-xs flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setIsLeadInfoOpen(!isLeadInfoOpen)}
-              className="flex items-center gap-2 text-[#0b57d0] hover:text-[#0842a0] font-medium"
-            >
-              <span>📊 Sheets Lead Data:</span>
-              <span className="text-[#444746] font-normal">
-                {firstName || lastName ? `${firstName} ${lastName}`.trim() : 'Auto-extracting from email'}
-              </span>
-              <ChevronDown size={14} className={clsx('transition-transform', isLeadInfoOpen && 'rotate-180')} />
-            </button>
-
-            <span className="text-[#747775] text-[11px] hidden sm:inline">
-              Auto-saved to Sheet: <strong>Gmail</strong>
-            </span>
-          </div>
-
-          {isLeadInfoOpen && (
-            <div className="bg-[#f0f4f9] px-4 py-2 border-b border-[#dadce0] grid grid-cols-2 gap-3 animate-slide-up-fade">
-              <div>
-                <label className="text-[11px] text-[#444746] font-medium block mb-1">First Name (Sheet Col A)</label>
+          {/* 6. PROMINENT REALTIME LEAD EXTRACTION BAR (Directly Visible) */}
+          <div className="bg-[#f8fafd] border-b border-[#dadce0] px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+              <UserCheck size={15} className="text-[#0b57d0] flex-shrink-0" />
+              <span className="font-semibold text-[#1f1f1f]">Lead Contact:</span>
+              <div className="flex items-center gap-1.5 flex-1">
                 <input
                   type="text"
                   value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="e.g. Lucky"
-                  className="w-full bg-white border border-[#dadce0] rounded-md px-2.5 py-1 text-xs text-[#1f1f1f] outline-none focus:border-[#0b57d0]"
+                  onChange={(e) => {
+                    setFirstName(e.target.value);
+                    setHasManuallyEditedName(true);
+                  }}
+                  placeholder="First Name"
+                  className="w-28 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2 py-1 text-xs text-[#1f1f1f] outline-none"
+                  title="First Name (Logs to Google Sheet Column A)"
                 />
-              </div>
-              <div>
-                <label className="text-[11px] text-[#444746] font-medium block mb-1">Last Name (Sheet Col B)</label>
                 <input
                   type="text"
                   value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  placeholder="e.g. Saini"
-                  className="w-full bg-white border border-[#dadce0] rounded-md px-2.5 py-1 text-xs text-[#1f1f1f] outline-none focus:border-[#0b57d0]"
+                  onChange={(e) => {
+                    setLastName(e.target.value);
+                    setHasManuallyEditedName(true);
+                  }}
+                  placeholder="Last Name"
+                  className="w-28 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2 py-1 text-xs text-[#1f1f1f] outline-none"
+                  title="Last Name (Logs to Google Sheet Column B)"
                 />
               </div>
             </div>
-          )}
+
+            <span className="text-[11px] text-[#1e8e3e] font-medium bg-[#e6f4ea] px-2 py-0.5 rounded-full border border-[#ceead6]">
+              ✓ Auto-logs to Sheets: Gmail!A:F
+            </span>
+          </div>
 
           {/* 7. Editable Message Canvas */}
           <div className="flex-1 p-4 overflow-y-auto relative min-h-[180px] bg-white">
@@ -445,7 +504,7 @@ export function ComposeWindow({
             )}
           </div>
 
-          {/* 8. Gmail Formatting Toolbar (Exact Replica of Screenshot) */}
+          {/* 8. Gmail Formatting Toolbar */}
           {showFormatBar && (
             <div className="bg-[#f2f6fc] border-t border-[#e0e2e6] px-3 py-1.5 flex items-center gap-1 overflow-x-auto select-none text-xs text-[#444746]">
               {/* Font Family */}
@@ -565,7 +624,7 @@ export function ComposeWindow({
             </div>
           )}
 
-          {/* 9. Bottom Action Bar (Send Button + Icons) */}
+          {/* 9. Bottom Action Bar */}
           <div className="px-4 py-3 bg-white border-t border-[#e0e2e6] flex items-center justify-between select-none relative">
             <div className="flex items-center gap-3">
               {/* Blue Gmail Send Button */}
@@ -594,7 +653,7 @@ export function ComposeWindow({
                 </button>
               </div>
 
-              {/* Action Icons matching user's screenshot */}
+              {/* Action Icons */}
               <div className="flex items-center gap-0.5 sm:gap-1 text-[#444746]">
                 {/* Format options toggle */}
                 <button
@@ -625,7 +684,7 @@ export function ComposeWindow({
                   type="button"
                   className="p-2 rounded-full hover:bg-black/5"
                   title="Attach files"
-                  onClick={() => onError('Attachments will be included via Google Drive links.')}
+                  onClick={() => onError('Note: Attachments are supported via Google Drive links.')}
                 >
                   <Paperclip size={17} />
                 </button>
@@ -673,15 +732,6 @@ export function ComposeWindow({
                   )}
                 </div>
 
-                {/* Photo / Image */}
-                <button
-                  type="button"
-                  className="p-2 rounded-full hover:bg-black/5 hidden sm:block"
-                  title="Insert photo"
-                >
-                  <ImageIcon size={17} />
-                </button>
-
                 {/* Signature Toggle */}
                 <button
                   type="button"
@@ -706,14 +756,20 @@ export function ComposeWindow({
               </div>
             </div>
 
-            {/* Trash button on far right */}
+            {/* Trash button */}
             <button
               type="button"
               onClick={() => {
                 if (confirm('Discard this draft?')) {
                   setToChips([]);
                   setToInput('');
+                  setCcChips([]);
+                  setCcInput('');
+                  setBccChips([]);
+                  setBccInput('');
                   setSubject('');
+                  setFirstName('');
+                  setLastName('');
                   if (bodyRef.current) bodyRef.current.innerHTML = '';
                   if (onClose) onClose();
                 }

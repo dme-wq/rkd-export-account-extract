@@ -1,70 +1,35 @@
-// RKD Gmail Extractor - Service Worker for PWA
+// RKD Gmail Extractor - Service Worker (Always Network-First to prevent old theme caching)
 
-const CACHE_NAME = 'rkd-gmail-extractor-v1';
-const STATIC_CACHE_URLS = [
-  '/',
-  '/manifest.json',
-];
+const CACHE_VERSION = 'rkd-v2-' + Date.now();
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_CACHE_URLS);
-    })
-  );
+  // Immediately take control
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+  // Clear ALL previous caches to force the latest theme and code
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      );
-    })
+    caches.keys().then((keys) => {
+      return Promise.all(keys.map((key) => caches.delete(key)));
+    }).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
-  // Skip API calls and auth (always fetch fresh)
+  // Always fetch fresh from network for page navigations and API
   if (
+    event.request.mode === 'navigate' ||
     event.request.url.includes('/api/') ||
-    event.request.url.includes('google') ||
     event.request.method !== 'GET'
   ) {
     return;
   }
 
+  // Network-First strategy
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
-        }
-        return response;
-      }).catch(() => {
-        // Return cached version if offline
-        return caches.match('/');
-      });
-    })
+    fetch(event.request)
+      .then((response) => response)
+      .catch(() => caches.match(event.request))
   );
 });
-
-// Push notification support (future use)
-self.addEventListener('push', (event) => {
-  if (event.data) {
-    const data = event.data.json();
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: 'https://static.wixstatic.com/media/68b92a_d71e34133826499983234774dea1945b~mv2.png/v1/fill/w_186,h_156,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/RKD-Logo.png',
-    });
-  }
-});
-

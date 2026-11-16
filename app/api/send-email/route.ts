@@ -2,19 +2,55 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
+import { extractNameFromEmail } from '@/lib/nameExtractor';
 
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.accessToken) {
-      return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized. Please sign in with your Google account.' },
+        { status: 401 }
+      );
     }
 
     const body = await req.json();
-    const { to, cc, bcc, subject, body: emailBody, signature, firstName, lastName } = body;
+    const {
+      to,
+      cc,
+      bcc,
+      subject,
+      body: emailBody,
+      signature,
+      firstName,
+      lastName,
+    } = body;
 
-    if (!to || !subject || !emailBody) {
-      return NextResponse.json({ error: 'Missing required fields: to, subject, body' }, { status: 400 });
+    // Normalize recipients
+    const toList = normalizeEmailList(to);
+    const ccList = normalizeEmailList(cc);
+    const bccList = normalizeEmailList(bcc);
+
+    if (toList.length === 0) {
+      return NextResponse.json({ error: 'At least one recipient (To) is required.' }, { status: 400 });
+    }
+
+    if (!subject || !subject.trim()) {
+      return NextResponse.json({ error: 'Email subject is required.' }, { status: 400 });
+    }
+
+    if (!emailBody || !emailBody.trim()) {
+      return NextResponse.json({ error: 'Email body is required.' }, { status: 400 });
+    }
+
+    // Determine First & Last Name
+    let finalFirstName = (firstName || '').trim();
+    let finalLastName = (lastName || '').trim();
+
+    if (!finalFirstName && !finalLastName && toList[0]) {
+      const extracted = extractNameFromEmail(toList[0]);
+      finalFirstName = extracted.firstName;
+      finalLastName = extracted.lastName;
     }
 
     // Setup Google OAuth2 client
@@ -25,67 +61,151 @@ export async function POST(req: NextRequest) {
     oauth2Client.setCredentials({ access_token: session.accessToken });
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const userEmail = session.user?.email || 'me';
 
-    // Build the email with signature
-    const fullBody = signature
-      ? `${emailBody}\n\n--\n${signature}`
-      : emailBody;
-
-    // Encode email to base64url (RFC 2822 format)
-    const toHeader = Array.isArray(to) ? to.join(', ') : to;
-    const ccHeader = cc && (Array.isArray(cc) ? cc.join(', ') : cc);
-    const bccHeader = bcc && (Array.isArray(bcc) ? bcc.join(', ') : bcc);
-
-    const emailLines = [
-      `To: ${toHeader}`,
-      ccHeader ? `Cc: ${ccHeader}` : '',
-      bccHeader ? `Bcc: ${bccHeader}` : '',
-      `Subject: ${subject}`,
-      'Content-Type: text/html; charset=utf-8',
-      'MIME-Version: 1.0',
-      '',
-      fullBody,
-    ].filter(Boolean);
-
-    const emailContent = emailLines.join('\r\n');
-    const encodedEmail = Buffer.from(emailContent)
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-
-    // Send the email
-    await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw: encodedEmail },
+    // Build raw MIME RFC 2822 email
+    const rawEncodedEmail = buildRawEmail({
+      from: userEmail,
+      to: toList,
+      cc: ccList,
+      bcc: bccList,
+      subject: subject.trim(),
+      htmlBody: emailBody,
     });
 
-    // Extract first/last name from "to" email or use provided values
-    const toEmail = Array.isArray(to) ? to[0] : to;
-    const derivedFirstName = firstName || toEmail.split('@')[0].split('.')[0] || '';
-    const derivedLastName = lastName || toEmail.split('@')[0].split('.')[1] || '';
+    // 1. Send the email via Gmail API
+    let messageId: string | undefined;
+    try {
+      const sendRes = await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: rawEncodedEmail,
+        },
+      });
+      messageId = sendRes.data.id || undefined;
+    } catch (gmailErr: unknown) {
+      console.error('Gmail send error:', gmailErr);
+      const msg = gmailErr instanceof Error ? gmailErr.message : 'Unknown Gmail error';
+      return NextResponse.json(
+        {
+          error: `Gmail sending failed: ${msg}. Make sure your Google Account has permission to send email via Gmail API.`,
+        },
+        { status: 500 }
+      );
+    }
 
-    // Log to Google Sheets
-    await logToSheets({
-      accessToken: session.accessToken,
-      firstName: derivedFirstName,
-      lastName: derivedLastName,
-      emailTo: toEmail,
-      ccEmails: ccHeader || '',
-      bccEmails: bccHeader || '',
-      signature: signature || '',
+    // 2. Log to Google Sheets
+    let sheetsSuccess = false;
+    let sheetNote = '';
+
+    try {
+      await logToSheets({
+        oauth2Client,
+        firstName: finalFirstName,
+        lastName: finalLastName,
+        emailTo: toList.join(', '),
+        ccEmails: ccList.join(', '),
+        bccEmails: bccList.join(', '),
+        signature: signature || '',
+      });
+      sheetsSuccess = true;
+    } catch (sheetErr: unknown) {
+      console.error('Google Sheets log error:', sheetErr);
+      const msg = sheetErr instanceof Error ? sheetErr.message : 'Unknown Sheet error';
+      sheetNote = `Email sent successfully! (Note: Could not record in Google Sheet: ${msg}. Make sure the sheet is shared with ${userEmail} as Editor).`;
+    }
+
+    return NextResponse.json({
+      success: true,
+      messageId,
+      emailSent: true,
+      sheetsLogged: sheetsSuccess,
+      message: sheetNote || 'Email sent and logged to Google Sheets successfully!',
+      lead: {
+        firstName: finalFirstName,
+        lastName: finalLastName,
+        emailTo: toList.join(', '),
+        ccEmails: ccList.join(', '),
+        bccEmails: bccList.join(', '),
+      },
     });
-
-    return NextResponse.json({ success: true, message: 'Email sent and logged successfully!' });
   } catch (error: unknown) {
-    console.error('Send email error:', error);
-    const errMessage = error instanceof Error ? error.message : 'Failed to send email';
+    console.error('Send email route error:', error);
+    const errMessage = error instanceof Error ? error.message : 'Failed to process email';
     return NextResponse.json({ error: errMessage }, { status: 500 });
   }
 }
 
+// Convert string / array into clean email array
+function normalizeEmailList(input: unknown): string[] {
+  if (!input) return [];
+  if (Array.isArray(input)) {
+    return input.map((e) => String(e).trim()).filter((e) => isValidEmail(e));
+  }
+  if (typeof input === 'string') {
+    return input
+      .split(/[,;\s]+/)
+      .map((e) => e.trim())
+      .filter((e) => isValidEmail(e));
+  }
+  return [];
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// RFC 2822 MIME builder with strict CRLF CRLF separation
+function buildRawEmail({
+  from,
+  to,
+  cc,
+  bcc,
+  subject,
+  htmlBody,
+}: {
+  from: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  htmlBody: string;
+}): string {
+  const headers: string[] = [];
+
+  headers.push(`From: ${from}`);
+  headers.push(`To: ${to.join(', ')}`);
+
+  if (cc.length > 0) {
+    headers.push(`Cc: ${cc.join(', ')}`);
+  }
+
+  if (bcc.length > 0) {
+    headers.push(`Bcc: ${bcc.join(', ')}`);
+  }
+
+  // RFC 2047 encoded subject
+  const utf8Subject = `=?utf-8?B?${Buffer.from(subject, 'utf-8').toString('base64')}?=`;
+  headers.push(`Subject: ${utf8Subject}`);
+  headers.push('MIME-Version: 1.0');
+  headers.push('Content-Type: text/html; charset=utf-8');
+  headers.push('Content-Transfer-Encoding: base64');
+
+  const base64Body = Buffer.from(htmlBody, 'utf-8').toString('base64');
+
+  // Separated strictly by \r\n\r\n
+  const mimeMessage = headers.join('\r\n') + '\r\n\r\n' + base64Body;
+
+  // Web-safe base64url encoding
+  return Buffer.from(mimeMessage, 'utf-8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 async function logToSheets({
-  accessToken,
+  oauth2Client,
   firstName,
   lastName,
   emailTo,
@@ -93,7 +213,7 @@ async function logToSheets({
   bccEmails,
   signature,
 }: {
-  accessToken: string;
+  oauth2Client: InstanceType<typeof google.auth.OAuth2>;
   firstName: string;
   lastName: string;
   emailTo: string;
@@ -101,46 +221,65 @@ async function logToSheets({
   bccEmails: string;
   signature: string;
 }) {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET
-  );
-  oauth2Client.setCredentials({ access_token: accessToken });
-
   const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
   const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
 
-  // Check if header row exists; if not, add it
+  // Find sheet title (default to 'Gmail' or first sheet)
+  let targetSheet = 'Gmail';
+  try {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const sheetsList = meta.data.sheets || [];
+    const gmailSheet = sheetsList.find(
+      (s) => s.properties?.title?.toLowerCase() === 'gmail'
+    );
+    if (gmailSheet && gmailSheet.properties?.title) {
+      targetSheet = gmailSheet.properties.title;
+    } else if (sheetsList[0]?.properties?.title) {
+      targetSheet = sheetsList[0].properties.title;
+    }
+  } catch (err) {
+    console.warn('Could not inspect sheet metadata, falling back to Gmail:', err);
+  }
+
+  // Ensure header row exists
   try {
     const headerCheck = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Gmail!A1:F1',
+      range: `${targetSheet}!A1:F1`,
     });
 
     const headerValues = headerCheck.data.values?.[0];
     if (!headerValues || headerValues.length === 0) {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: 'Gmail!A1:F1',
-        valueInputOption: 'RAW',
+        range: `${targetSheet}!A1:F1`,
+        valueInputOption: 'USER_ENTERED',
         requestBody: {
-          values: [['First Name', 'Last Name', 'Email ID', 'CC Email ID', 'BCC Email ID', 'Signature']],
+          values: [
+            ['First Name', 'Last Name', 'Email ID', 'CC Email ID', 'BCC Email ID', 'Signature'],
+          ],
         },
       });
     }
-  } catch {
-    // Sheet might not have the tab yet, create header anyway
+  } catch (hErr) {
+    console.warn('Header ensure notice:', hErr);
   }
 
-  // Append the new row
+  // Append data row
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: 'Gmail!A:F',
-    valueInputOption: 'RAW',
+    range: `${targetSheet}!A:F`,
+    valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: {
-      values: [[firstName, lastName, emailTo, ccEmails, bccEmails, signature]],
+      values: [[
+        firstName || '',
+        lastName || '',
+        emailTo || '',
+        ccEmails || '',
+        bccEmails || '',
+        signature || '',
+      ]],
     },
   });
 }
-

@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#c8102e',
+  themeColor: '#0b57d0',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
@@ -40,14 +40,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         <link rel="icon" href="https://static.wixstatic.com/media/68b92a_d71e34133826499983234774dea1945b~mv2.png/v1/fill/w_186,h_156,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/RKD-Logo.png" />
       </head>
-      <body className="h-screen overflow-hidden">
+      <body className="h-screen overflow-hidden bg-[#f6f8fc]">
         <Providers>{children}</Providers>
         <script
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
-                window.addEventListener('load', () => {
-                  navigator.serviceWorker.register('/sw.js').catch(() => {});
+                // Clear any legacy caches to ensure latest Google/Gmail theme
+                if ('caches' in window) {
+                  caches.keys().then(function(names) {
+                    for (var name of names) {
+                      if (name.indexOf('rkd-gmail-extractor-v1') !== -1) {
+                        caches.delete(name);
+                      }
+                    }
+                  });
+                }
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js?v=2').catch(function() {});
                 });
               }
             `,
