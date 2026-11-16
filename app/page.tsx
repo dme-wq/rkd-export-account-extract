@@ -1,7 +1,8 @@
 'use client';
 
-import { useSession, signOut } from 'next-auth/react';
+import { useSession, signOut, signIn } from 'next-auth/react';
 import { useState, useEffect, useCallback } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { ComposeWindow } from '@/components/ComposeWindow';
 import { SentLog } from '@/components/SentLog';
 import { LoginScreen } from '@/components/LoginScreen';
@@ -129,6 +130,22 @@ export default function Home() {
         onMenuToggle={() => setIsMobileNavOpen(!isMobileNavOpen)}
         onSignOut={() => signOut()}
       />
+
+      {/* Google Session Refresh Alert Banner */}
+      {session?.error === 'RefreshAccessTokenError' && (
+        <div className="bg-[#fef7e0] border-b border-[#fce8b2] px-4 py-2 flex items-center justify-between text-xs text-[#7a4100] z-40">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-[#ea8600] shrink-0" />
+            <span>Your Google authentication session has expired. Please re-authenticate to keep sending emails.</span>
+          </div>
+          <button
+            onClick={() => signIn('google', { callbackUrl: window.location.href })}
+            className="ml-4 px-3 py-1 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-md text-xs font-medium shrink-0 transition-colors shadow-xs"
+          >
+            Reconnect Google
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace */}
       <div className="flex flex-1 overflow-hidden relative">

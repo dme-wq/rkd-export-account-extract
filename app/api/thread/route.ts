@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
+import { getGoogleOAuth2Client } from '@/lib/googleAuth';
 import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
 
 export interface ThreadMessage {
@@ -34,11 +35,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Either email or threadId parameter is required' }, { status: 400 });
     }
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
-    );
-    oauth2Client.setCredentials({ access_token: session.accessToken });
+    const oauth2Client = getGoogleOAuth2Client(session);
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const userEmail = (session.user?.email || '').toLowerCase().trim();

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
+import { getGoogleOAuth2Client } from '@/lib/googleAuth';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
 import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
 
@@ -26,11 +27,7 @@ export async function GET(req: NextRequest) {
     // 1. If user is logged in, query Gmail API message headers (Contains real Google sender/recipient display names!)
     if (session && session.accessToken) {
       try {
-        const oauth2Client = new google.auth.OAuth2(
-          process.env.GOOGLE_CLIENT_ID,
-          process.env.GOOGLE_CLIENT_SECRET
-        );
-        oauth2Client.setCredentials({ access_token: session.accessToken });
+        const oauth2Client = getGoogleOAuth2Client(session);
 
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 

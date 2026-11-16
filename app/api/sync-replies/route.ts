@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
+import { getGoogleOAuth2Client } from '@/lib/googleAuth';
 import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
 import { extractDetailsFromSignature } from '@/lib/aiSignatureExtractor';
 import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
@@ -9,15 +10,11 @@ import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !session.accessToken) {
-      return NextResponse.json({ error: 'Unauthorized: Please log in with Google.' }, { status: 401 });
+    if (!session || !session.accessToken || session.error === 'RefreshAccessTokenError') {
+      return NextResponse.json({ error: 'Unauthorized: Session expired. Please log in again.' }, { status: 401 });
     }
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
-    );
-    oauth2Client.setCredentials({ access_token: session.accessToken });
+    const oauth2Client = getGoogleOAuth2Client(session);
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });

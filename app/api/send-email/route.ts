@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { google } from 'googleapis';
+import { getGoogleOAuth2Client } from '@/lib/googleAuth';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
 import { extractDetailsFromSignature, ExtractedSignatureData } from '@/lib/aiSignatureExtractor';
 import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
@@ -17,9 +18,12 @@ export interface EmailAttachmentPayload {
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !session.accessToken) {
+    if (!session || !session.accessToken || session.error === 'RefreshAccessTokenError') {
       return NextResponse.json(
-        { error: 'Unauthorized. Please sign in with your Google account.' },
+        {
+          error: 'Google session expired or unauthorized. Please re-authenticate your Google account.',
+          authExpired: true,
+        },
         { status: 401 }
       );
     }
@@ -56,12 +60,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email body is required.' }, { status: 400 });
     }
 
-    // Initialize authenticated Google clients
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET
-    );
-    oauth2Client.setCredentials({ access_token: session.accessToken });
+    // Initialize authenticated Google clients with automatic token refresh
+    const oauth2Client = getGoogleOAuth2Client(session);
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
     const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
@@ -229,11 +229,22 @@ export async function POST(req: NextRequest) {
     } catch (gmailErr: unknown) {
       console.error('Gmail send error:', gmailErr);
       const msg = gmailErr instanceof Error ? gmailErr.message : 'Unknown Gmail error';
+      const isAuthError =
+        msg.includes('invalid authentication credentials') ||
+        msg.includes('invalid_grant') ||
+        msg.includes('OAuth 2') ||
+        msg.includes('401') ||
+        msg.includes('Login Required') ||
+        msg.includes('unauthorized');
+
       return NextResponse.json(
         {
-          error: `Gmail sending failed: ${msg}. Make sure your Google Account has permission to send email via Gmail API.`,
+          error: isAuthError
+            ? 'Google login session expired. Please sign in again with Google to send this email.'
+            : `Gmail sending failed: ${msg}. Make sure your Google Account has permission to send email via Gmail API.`,
+          authExpired: isAuthError,
         },
-        { status: 500 }
+        { status: isAuthError ? 401 : 500 }
       );
     }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { Session } from 'next-auth';
+import { signIn } from 'next-auth/react';
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Send, ChevronDown, X, Minus, Maximize2, Minimize2,
@@ -82,6 +83,7 @@ export function ComposeWindow({
   const [linkUrl, setLinkUrl] = useState('');
   const [linkText, setLinkText] = useState('');
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+  const [isAuthExpiredModalOpen, setIsAuthExpiredModalOpen] = useState(false);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const toInputRef = useRef<HTMLInputElement>(null);
@@ -355,7 +357,17 @@ export function ComposeWindow({
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to send message');
+        const errMsg = data.error || 'Failed to send message';
+        const isAuthErr =
+          res.status === 401 ||
+          Boolean(data.authExpired) ||
+          /credentials|token|unauthorized|permission|invalid_grant/i.test(errMsg);
+
+        if (isAuthErr) {
+          setIsAuthExpiredModalOpen(true);
+          return;
+        }
+        throw new Error(errMsg);
       }
 
       // Reset Form on Success
@@ -1195,6 +1207,44 @@ export function ComposeWindow({
                 className="px-5 py-2 rounded-full text-xs font-semibold text-white bg-[#c5221f] hover:bg-[#a51d1a] shadow-xs transition-colors"
               >
                 Discard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Session Expired / Re-Auth Modal */}
+      {isAuthExpiredModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-[#dadce0] animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-[#fef7e0] text-[#b06000] flex items-center justify-center mx-auto mb-4 border border-[#fce8b2]">
+              <AlertTriangle className="w-6 h-6 text-[#ea8600]" />
+            </div>
+            <h3 className="text-base font-semibold text-[#202124] text-center mb-1">
+              Google Session Expired
+            </h3>
+            <p className="text-xs text-[#5f6368] text-center mb-6 leading-relaxed">
+              Google security credentials expire after 1 hour. Please sign in again with Google to refresh permissions and send this email. Your composed draft and attachments are safely kept!
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsAuthExpiredModalOpen(false)}
+                className="flex-1 px-4 py-2 border border-[#dadce0] text-[#3c4043] rounded-full text-xs font-semibold hover:bg-[#f8fafd] transition-colors"
+              >
+                Keep Editing
+              </button>
+              <button
+                type="button"
+                onClick={() => signIn('google', { callbackUrl: window.location.href })}
+                className="flex-1 px-4 py-2 bg-[#0b57d0] hover:bg-[#0842a0] text-white rounded-full text-xs font-semibold transition-colors shadow-xs flex items-center justify-center gap-2"
+              >
+                <img
+                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                  alt="Google"
+                  className="w-4 h-4 bg-white rounded-full p-0.5"
+                />
+                Sign In with Google
               </button>
             </div>
           </div>
