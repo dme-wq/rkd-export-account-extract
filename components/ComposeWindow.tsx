@@ -7,7 +7,7 @@ import {
   Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
   Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
-  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2, AlertOctagon
+  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2, AlertOctagon, CopyPlus
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
@@ -23,6 +23,7 @@ interface AttachedFile {
 interface ComposeWindowProps {
   session: Session;
   existingEmails?: string[];
+  templateData?: { subject: string; body: string; id: number } | null;
   onSent: () => void;
   onError: (msg: string) => void;
   onClose?: () => void;
@@ -34,6 +35,7 @@ const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 export function ComposeWindow({
   session,
   existingEmails = [],
+  templateData,
   onSent,
   onError,
   onClose,
@@ -108,6 +110,31 @@ export function ComposeWindow({
     existingEmailSet.has(toInput.trim().toLowerCase())
   );
   const duplicateEmail = duplicateChip || (isInputDuplicate ? toInput.trim() : '');
+
+  // Template Loader state
+  const [loadedTemplateName, setLoadedTemplateName] = useState<string | null>(null);
+
+  // Load template data (Subject & Body) when user chooses an old template
+  useEffect(() => {
+    if (templateData && templateData.id) {
+      setSubject(templateData.subject || '');
+      setLoadedTemplateName(templateData.subject || 'Previous Email Template');
+      if (bodyRef.current) {
+        const html = templateData.body.includes('<br>') || templateData.body.includes('</p>') || templateData.body.includes('</div>')
+          ? templateData.body
+          : templateData.body.replace(/\n/g, '<br/>');
+        bodyRef.current.innerHTML = html;
+      }
+      // Reset recipient fields so it's clean for the new recipient
+      setToChips([]);
+      setToInput('');
+      setFirstName('');
+      setLastName('');
+      setDetectedCompany('');
+      setHasManuallyEditedName(false);
+      toInputRef.current?.focus();
+    }
+  }, [templateData]);
 
   // Realtime Google Profile Name Lookup
   const lookupActualGoogleName = useCallback(async (email: string) => {
@@ -611,6 +638,26 @@ export function ComposeWindow({
                     className="flex-1 min-w-[120px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
                   />
                 </div>
+              </div>
+            )}
+
+            {/* Template Loaded Banner */}
+            {loadedTemplateName && (
+              <div className="mx-4 my-1.5 px-3.5 py-2 rounded-xl bg-[#eaf1fb] border border-[#c2e7ff] text-[#0b57d0] flex items-center justify-between text-xs font-medium animate-fadeIn">
+                <div className="flex items-center gap-2 truncate">
+                  <CopyPlus size={14} className="flex-shrink-0 text-[#0b57d0]" />
+                  <span className="truncate">
+                    Template Loaded: <strong>&quot;{loadedTemplateName}&quot;</strong> (Subject & Body pre-filled; enter new recipient)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLoadedTemplateName(null)}
+                  className="text-[#747775] hover:text-[#1f1f1f] text-xs font-semibold ml-2 cursor-pointer"
+                  title="Dismiss banner"
+                >
+                  ✕
+                </button>
               </div>
             )}
 

@@ -44,6 +44,7 @@ export default function Home() {
   const [records, setRecords] = useState<SentRecord[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [templateToUse, setTemplateToUse] = useState<{ subject: string; body: string; id: number } | null>(null);
 
   const addToast = useCallback((message: string, type: ToastType['type'] = 'info') => {
     const id = Date.now();
@@ -52,6 +53,19 @@ export default function Home() {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4500);
   }, []);
+
+  const handleUseTemplate = useCallback(
+    (template: { subject: string; body: string }) => {
+      setTemplateToUse({
+        subject: template.subject,
+        body: template.body,
+        id: Date.now(),
+      });
+      setIsComposeOpen(true);
+      addToast(`Template loaded: "${template.subject || 'Previous email'}" ready for new recipient!`, 'success');
+    },
+    [addToast]
+  );
 
   const fetchRecords = useCallback(async () => {
     if (!session) return;
@@ -144,6 +158,7 @@ export default function Home() {
                 loading={recordsLoading}
                 onRefresh={fetchRecords}
                 onComposeClick={() => setIsComposeOpen(true)}
+                onUseTemplate={handleUseTemplate}
               />
             </div>
 
@@ -153,6 +168,7 @@ export default function Home() {
                 <ComposeWindow
                   session={session}
                   existingEmails={records.map((r) => r.emailTo)}
+                  templateData={templateToUse}
                   onSent={handleEmailSent}
                   onError={(msg) => addToast(msg, 'error')}
                   onClose={() => setActiveView('sent')}
@@ -167,6 +183,7 @@ export default function Home() {
           <ComposeWindow
             session={session}
             existingEmails={records.map((r) => r.emailTo)}
+            templateData={templateToUse}
             isFloating={true}
             onSent={handleEmailSent}
             onError={(msg) => addToast(msg, 'error')}

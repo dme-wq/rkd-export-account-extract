@@ -5,7 +5,7 @@ import {
   RefreshCw, Search, Mail, Send, ChevronLeft, ChevronRight,
   CheckCircle2, Copy, Check, Sparkles, Phone, Building2,
   Paperclip, Eye, X, CornerUpLeft, MessageSquare, Clock,
-  UserCheck, AlertCircle, Loader2
+  UserCheck, AlertCircle, Loader2, CopyPlus
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
@@ -30,9 +30,10 @@ interface SentLogProps {
   loading: boolean;
   onRefresh: () => void;
   onComposeClick: () => void;
+  onUseTemplate?: (template: { subject: string; body: string }) => void;
 }
 
-export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLogProps) {
+export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemplate }: SentLogProps) {
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'replied' | 'pending'>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -516,6 +517,21 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
                           >
                             <Eye size={15} />
                           </button>
+                          {onUseTemplate && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onUseTemplate({
+                                  subject: rec.subject || '',
+                                  body: rec.messageBody || '',
+                                })
+                              }
+                              className="p-1.5 rounded-full hover:bg-[#c2e7ff]/60 text-[#001d35] hover:text-[#0b57d0] transition-colors"
+                              title="Use as Template for New Email (Same Subject & Body)"
+                            >
+                              <CopyPlus size={15} />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => copyEmail(rec.emailTo, rec.id)}
@@ -588,13 +604,32 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedEmail(null)}
-                className="p-1.5 rounded-full hover:bg-[#e0e2e6] text-[#747775] transition-colors cursor-pointer"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                {onUseTemplate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUseTemplate({
+                        subject: selectedEmail.subject || '',
+                        body: selectedEmail.messageBody || '',
+                      });
+                      setSelectedEmail(null);
+                    }}
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold text-[#001d35] bg-[#c2e7ff] hover:bg-[#b0d9f8] flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                    title="Compose a new email using this subject and message body"
+                  >
+                    <CopyPlus size={13} />
+                    <span className="hidden sm:inline">Use as Template</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedEmail(null)}
+                  className="p-1.5 rounded-full hover:bg-[#e0e2e6] text-[#747775] transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}
@@ -847,17 +882,35 @@ export function SentLog({ records, loading, onRefresh, onComposeClick }: SentLog
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-3.5 bg-[#f6f8fc] border-t border-[#e0e2e6] flex items-center justify-between">
+            <div className="px-6 py-3.5 bg-[#f6f8fc] border-t border-[#e0e2e6] flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs text-[#747775]">
                 Recipient: <strong>{selectedEmail.emailTo}</strong>
               </span>
-              <button
-                type="button"
-                onClick={() => setSelectedEmail(null)}
-                className="px-5 py-2 rounded-full text-xs font-semibold text-white bg-[#0b57d0] hover:bg-[#105dc1] transition-colors cursor-pointer"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                {onUseTemplate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUseTemplate({
+                        subject: selectedEmail.subject || '',
+                        body: selectedEmail.messageBody || '',
+                      });
+                      setSelectedEmail(null);
+                    }}
+                    className="px-4 py-2 rounded-full text-xs font-semibold text-[#001d35] bg-[#c2e7ff] hover:bg-[#b0d9f8] flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                  >
+                    <CopyPlus size={14} />
+                    <span>Use as Template for New Mail</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedEmail(null)}
+                  className="px-5 py-2 rounded-full text-xs font-semibold text-white bg-[#0b57d0] hover:bg-[#105dc1] transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
