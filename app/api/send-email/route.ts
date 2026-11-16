@@ -5,6 +5,13 @@ import { google } from 'googleapis';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
 import { extractDetailsFromSignature } from '@/lib/aiSignatureExtractor';
 
+export interface EmailAttachmentPayload {
+  filename: string;
+  mimeType: string;
+  size: number;
+  base64Data: string;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -25,6 +32,7 @@ export async function POST(req: NextRequest) {
       signature,
       firstName,
       lastName,
+      attachments = [],
     } = body;
 
     // Normalize recipients
@@ -67,7 +75,7 @@ export async function POST(req: NextRequest) {
       if (actualGoogleName.lastName) finalLastName = actualGoogleName.lastName;
     }
 
-    // Fallback if still empty: try AI signature or email parser
+    // Fallback if still empty
     if (!finalFirstName && !finalLastName) {
       if (aiExtracted.firstName || aiExtracted.lastName) {
         finalFirstName = aiExtracted.firstName || '';
@@ -89,14 +97,15 @@ export async function POST(req: NextRequest) {
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const userEmail = session.user?.email || 'me';
 
-    // Build raw MIME RFC 2822 email
-    const rawEncodedEmail = buildRawEmail({
+    // Build raw MIME RFC 2822 email with optional attachments
+    const rawEncodedEmail = buildRawEmailWithAttachments({
       from: userEmail,
       to: toList,
       cc: ccList,
       bcc: bccList,
       subject: subject.trim(),
       htmlBody: emailBody,
+      attachments,
     });
 
     // 2. Send the email via Gmail API
@@ -247,14 +256,15 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// RFC 2822 MIME builder with strict CRLF CRLF separation
-function buildRawEmail({
+// RFC 2822 / RFC 2046 MIME builder supporting single-part and multipart attachments
+function buildRawEmailWithAttachments({
   from,
   to,
   cc,
   bcc,
   subject,
   htmlBody,
+  attachments = [],
 }: {
   from: string;
   to: string[];
@@ -262,6 +272,7 @@ function buildRawEmail({
   bcc: string[];
   subject: string;
   htmlBody: string;
+  attachments?: EmailAttachmentPayload[];
 }): string {
   const headers: string[] = [];
 
@@ -280,15 +291,52 @@ function buildRawEmail({
   const utf8Subject = `=?utf-8?B?${Buffer.from(subject, 'utf-8').toString('base64')}?=`;
   headers.push(`Subject: ${utf8Subject}`);
   headers.push('MIME-Version: 1.0');
+
+  // Case A: With Attachments (multipart/mixed)
+  if (attachments && attachments.length > 0) {
+    const boundary = `__RKD_EXTRACTOR_BOUNDARY_${Date.now()}__`;
+    headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+
+    const parts: string[] = [];
+
+    // Part 1: HTML Body
+    parts.push(`--${boundary}`);
+    parts.push('Content-Type: text/html; charset=utf-8');
+    parts.push('Content-Transfer-Encoding: base64');
+    parts.push('');
+    parts.push(Buffer.from(htmlBody, 'utf-8').toString('base64'));
+
+    // Part 2+: Attachments
+    for (const att of attachments) {
+      const cleanBase64 = att.base64Data.replace(/^data:.*?;base64,/, '').trim();
+      const safeFilename = (att.filename || 'attachment').replace(/[^\w.-]/g, '_');
+      const safeMime = att.mimeType || 'application/octet-stream';
+
+      parts.push(`--${boundary}`);
+      parts.push(`Content-Type: ${safeMime}; name="${safeFilename}"`);
+      parts.push(`Content-Disposition: attachment; filename="${safeFilename}"`);
+      parts.push('Content-Transfer-Encoding: base64');
+      parts.push('');
+      parts.push(cleanBase64);
+    }
+
+    parts.push(`--${boundary}--`);
+
+    const fullMessage = headers.join('\r\n') + '\r\n\r\n' + parts.join('\r\n');
+    return Buffer.from(fullMessage, 'utf-8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+
+  // Case B: Simple HTML Email (No attachments)
   headers.push('Content-Type: text/html; charset=utf-8');
   headers.push('Content-Transfer-Encoding: base64');
 
   const base64Body = Buffer.from(htmlBody, 'utf-8').toString('base64');
-
-  // Separated strictly by \r\n\r\n
   const mimeMessage = headers.join('\r\n') + '\r\n\r\n' + base64Body;
 
-  // Web-safe base64url encoding
   return Buffer.from(mimeMessage, 'utf-8')
     .toString('base64')
     .replace(/\+/g, '-')
