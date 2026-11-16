@@ -1,13 +1,13 @@
 'use client';
 
 import { Session } from 'next-auth';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Send, ChevronDown, X, Minus, Maximize2, Minimize2,
   Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
   Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
-  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2
+  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2, AlertOctagon
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
@@ -22,14 +22,18 @@ interface AttachedFile {
 
 interface ComposeWindowProps {
   session: Session;
+  existingEmails?: string[];
   onSent: () => void;
   onError: (msg: string) => void;
   onClose?: () => void;
   isFloating?: boolean;
 }
 
+const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
 export function ComposeWindow({
   session,
+  existingEmails = [],
   onSent,
   onError,
   onClose,
@@ -80,6 +84,31 @@ export function ComposeWindow({
   const bodyRef = useRef<HTMLDivElement>(null);
   const toInputRef = useRef<HTMLInputElement>(null);
 
+  // Duplicate Check against already emailed addresses
+  const existingEmailSet = useMemo(() => {
+    const set = new Set<string>();
+    if (existingEmails) {
+      for (const em of existingEmails) {
+        if (!em) continue;
+        const parts = em.split(/[,;\s]+/);
+        for (const p of parts) {
+          const clean = p.trim().toLowerCase();
+          if (clean) set.add(clean);
+        }
+      }
+    }
+    return set;
+  }, [existingEmails]);
+
+  // Realtime check for duplicate email
+  const duplicateChip = toChips.find((c) => existingEmailSet.has(c.toLowerCase().trim()));
+  const isInputDuplicate = Boolean(
+    toInput.trim() &&
+    isValidEmail(toInput.trim()) &&
+    existingEmailSet.has(toInput.trim().toLowerCase())
+  );
+  const duplicateEmail = duplicateChip || (isInputDuplicate ? toInput.trim() : '');
+
   // Realtime Google Profile Name Lookup
   const lookupActualGoogleName = useCallback(async (email: string) => {
     if (!email || !email.includes('@')) return;
@@ -119,8 +148,6 @@ export function ComposeWindow({
       lookupActualGoogleName(toChips[0]);
     }
   }, [toChips, hasManuallyEditedName, lookupActualGoogleName]);
-
-  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   const parseInputEmails = (text: string): string[] => {
     return text
@@ -241,6 +268,13 @@ export function ComposeWindow({
     if (finalTo.length === 0) {
       onError('Please specify at least one valid recipient (To) email address.');
       toInputRef.current?.focus();
+      return;
+    }
+
+    // Duplicate Check: Prevent sending if already mailed
+    const dupInFinal = finalTo.find((em) => existingEmailSet.has(em.toLowerCase().trim()));
+    if (dupInFinal) {
+      onError(`Aapne is email address (${dupInFinal}) par already mail kar diya hai! Duplicate mail bhejna allowed nahi hai.`);
       return;
     }
 
@@ -396,21 +430,38 @@ export function ComposeWindow({
               <span className="text-sm text-[#444746] font-normal w-9 flex-shrink-0">To</span>
               
               <div className="flex flex-wrap items-center gap-1.5 flex-1 pr-16 min-h-[28px]">
-                {toChips.map((email, idx) => (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1 bg-[#e8eaed] hover:bg-[#dfe2e6] text-[#1f1f1f] text-xs font-medium px-2.5 py-1 rounded-full border border-[#dadce0]"
-                  >
-                    <span>{email}</span>
-                    <button
-                      type="button"
-                      onClick={() => setToChips(toChips.filter((_, i) => i !== idx))}
-                      className="text-[#5f6368] hover:text-[#1f1f1f]"
+                {toChips.map((email, idx) => {
+                  const isThisChipDuplicate = existingEmailSet.has(email.toLowerCase().trim());
+                  return (
+                    <span
+                      key={idx}
+                      className={clsx(
+                        'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border transition-colors',
+                        isThisChipDuplicate
+                          ? 'bg-[#fce8e6] text-[#c5221f] border-[#f5c2c7]'
+                          : 'bg-[#e8eaed] hover:bg-[#dfe2e6] text-[#1f1f1f] border-[#dadce0]'
+                      )}
                     >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
+                      {isThisChipDuplicate && <AlertOctagon size={12} className="text-[#c5221f]" />}
+                      <span>{email}</span>
+                      {isThisChipDuplicate && (
+                        <span className="text-[10px] font-bold text-[#c5221f] bg-white px-1.5 py-0.2 rounded-full">
+                          Already Sent
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setToChips(toChips.filter((_, i) => i !== idx))}
+                        className={clsx(
+                          'text-xs hover:opacity-80',
+                          isThisChipDuplicate ? 'text-[#c5221f]' : 'text-[#5f6368] hover:text-[#1f1f1f]'
+                        )}
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  );
+                })}
                 <input
                   ref={toInputRef}
                   type="text"
@@ -454,6 +505,16 @@ export function ComposeWindow({
                 )}
               </div>
             </div>
+
+            {/* Already Sent Duplicate Warning Banner */}
+            {duplicateEmail && (
+              <div className="mx-4 my-1.5 px-3.5 py-2.5 rounded-xl bg-[#fce8e6] border border-[#f5c2c7] text-[#c5221f] flex items-center gap-2 text-xs font-medium animate-pulse">
+                <AlertOctagon size={16} className="text-[#c5221f] flex-shrink-0" />
+                <span>
+                  <strong>Already Sent Error:</strong> Aapne is email ID (<strong>{duplicateEmail}</strong>) par already mail kar diya hai! Duplicate mail bhejna allowed nahi hai.
+                </span>
+              </div>
+            )}
 
             {/* 3. CC Field */}
             {showCc && (
@@ -827,14 +888,22 @@ export function ComposeWindow({
                   <button
                     type="button"
                     onClick={handleSend}
-                    disabled={sending}
-                    className="bg-[#0b57d0] hover:bg-[#105dc1] active:bg-[#0842a0] text-white px-5 py-2.5 font-medium text-sm flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
+                    disabled={sending || Boolean(duplicateEmail)}
+                    className={clsx(
+                      'px-5 py-2.5 font-medium text-sm flex items-center gap-2 transition-colors',
+                      duplicateEmail
+                        ? 'bg-[#80868b] text-white cursor-not-allowed opacity-80'
+                        : 'bg-[#0b57d0] hover:bg-[#105dc1] active:bg-[#0842a0] text-white cursor-pointer disabled:opacity-50'
+                    )}
+                    title={duplicateEmail ? `Duplicate Error: Is email (${duplicateEmail}) par already mail bhej diya hai!` : 'Send email'}
                   >
                     {sending ? (
                       <>
                         <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         <span>Sending...</span>
                       </>
+                    ) : duplicateEmail ? (
+                      <span>Already Sent (Blocked)</span>
                     ) : (
                       <span>Send</span>
                     )}

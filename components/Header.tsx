@@ -84,25 +84,8 @@ export function Header({
         </div>
       </div>
 
-      {/* Right: Quick Links, Google Sheet, Apps & Profile */}
+      {/* Right: Support, Apps & Profile */}
       <div className="flex items-center gap-1 sm:gap-2">
-        {/* Google Sheet Live Button */}
-        <a
-          href="https://docs.google.com/spreadsheets/d/1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM/edit"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hidden md:flex items-center gap-1.5 bg-white hover:bg-[#f8fafd] border border-[#dadce0] text-[#1e8e3e] hover:text-[#137333] px-3 py-1.5 rounded-full text-xs font-medium shadow-xs transition-colors"
-          title="Open Google Sheet Leads"
-        >
-          {/* Sheets Icon */}
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" fill="#0F9D58"/>
-            <path d="M17 13H7v-2h10v2zm0-4H7V7h10v2zm0 8H7v-2h10v2z" fill="#ffffff"/>
-          </svg>
-          <span className="font-semibold text-gray-700">Google Sheet</span>
-          <ExternalLink size={12} className="text-gray-400" />
-        </a>
-
         {/* Support / Help */}
         <button
           type="button"

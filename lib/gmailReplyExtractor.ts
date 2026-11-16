@@ -123,3 +123,4 @@ export function extractSignatureFromReply(replyText: string): string {
 
   return '';
 }
+

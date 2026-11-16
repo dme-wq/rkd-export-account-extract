@@ -60,8 +60,62 @@ export async function POST(req: NextRequest) {
     );
     oauth2Client.setCredentials({ access_token: session.accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+    const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
+    const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
     const userEmail = session.user?.email || 'me';
     const primaryRecipient = toList[0];
+
+    // =========================================================================
+    // 🛑 1. DUPLICATE EMAIL CHECK: PREVENT SENDING TO ALREADY MAILED RECIPIENTS
+    // =========================================================================
+    let targetSheet = 'Gmail';
+    try {
+      const meta = await sheets.spreadsheets.get({ spreadsheetId });
+      const sheetsList = meta.data.sheets || [];
+      const foundSheet = sheetsList.find(
+        (s) => s.properties?.title?.toLowerCase() === 'gmail'
+      );
+      if (foundSheet && foundSheet.properties?.title) {
+        targetSheet = foundSheet.properties.title;
+      } else if (sheetsList[0]?.properties?.title) {
+        targetSheet = sheetsList[0].properties.title;
+      }
+    } catch (e) {
+      console.warn('Could not inspect sheet titles for duplicate check:', e);
+    }
+
+    try {
+      const existingSheetData = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${targetSheet}!C2:C`,
+      });
+      const existingRows = existingSheetData.data.values || [];
+      const existingEmailSet = new Set<string>();
+
+      for (const row of existingRows) {
+        if (row[0]) {
+          const splitEmails = String(row[0]).split(/[,;\s]+/);
+          for (const em of splitEmails) {
+            const clean = em.trim().toLowerCase();
+            if (clean) existingEmailSet.add(clean);
+          }
+        }
+      }
+
+      for (const recipient of toList) {
+        if (existingEmailSet.has(recipient.toLowerCase().trim())) {
+          return NextResponse.json(
+            {
+              error: `Aapne is email ID (${recipient}) par already mail bhej diya hai! Duplicate email bhejna allowed nahi hai.`,
+              duplicateEmail: recipient,
+            },
+            { status: 400 }
+          );
+        }
+      }
+    } catch (dupCheckErr) {
+      console.warn('Warning during duplicate email check:', dupCheckErr);
+    }
 
     // 1. Recipient Signature & Company Extraction (DO NOT log sender's signature into sheet!)
     let recipientSignature = '';
@@ -173,9 +227,32 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Log to Google Sheets (Col A to K with AI extracted signature fields)
+    // 3. Log to Google Sheets (Col A to O with Subject, Message & Attachments)
     let sheetsSuccess = false;
     let sheetNote = '';
+
+    const cleanMessageText = emailBody
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*[\/]?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .trim();
+
+    const attachmentSummary = attachments && attachments.length > 0
+      ? attachments.map((a: EmailAttachmentPayload) => `${a.filename} (${formatAttachmentSize(a.size)})`).join(', ')
+      : '';
+
+    const sentAt = new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
 
     try {
       await logToSheets({
@@ -191,6 +268,10 @@ export async function POST(req: NextRequest) {
         mobileNumber: aiExtracted.mobileNumber,
         secondaryMobileNumber: aiExtracted.secondaryMobileNumber,
         designation: aiExtracted.designation,
+        subject: subject.trim(),
+        messageBody: cleanMessageText,
+        attachments: attachmentSummary,
+        sentAt,
       });
       sheetsSuccess = true;
     } catch (sheetErr: unknown) {
@@ -388,6 +469,13 @@ function buildRawEmailWithAttachments({
     .replace(/=+$/, '');
 }
 
+function formatAttachmentSize(bytes: number): string {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
 async function logToSheets({
   oauth2Client,
   firstName,
@@ -401,6 +489,10 @@ async function logToSheets({
   mobileNumber,
   secondaryMobileNumber,
   designation,
+  subject,
+  messageBody,
+  attachments,
+  sentAt,
 }: {
   oauth2Client: InstanceType<typeof google.auth.OAuth2>;
   firstName: string;
@@ -414,6 +506,10 @@ async function logToSheets({
   mobileNumber: string;
   secondaryMobileNumber: string;
   designation: string;
+  subject: string;
+  messageBody: string;
+  attachments: string;
+  sentAt: string;
 }) {
   const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
   const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
@@ -435,18 +531,18 @@ async function logToSheets({
     console.warn('Could not inspect sheet metadata, falling back to Gmail:', err);
   }
 
-  // Ensure header row exists up to Column K
+  // Ensure header row exists up to Column O (15 columns)
   try {
     const headerCheck = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${targetSheet}!A1:K1`,
+      range: `${targetSheet}!A1:O1`,
     });
 
     const headerValues = headerCheck.data.values?.[0];
-    if (!headerValues || headerValues.length < 11) {
+    if (!headerValues || headerValues.length < 15) {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `${targetSheet}!A1:K1`,
+        range: `${targetSheet}!A1:O1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [
@@ -462,6 +558,10 @@ async function logToSheets({
               'Mobile Number',
               'Secondary Mobile Number',
               'Designation',
+              'Subject',
+              'Message',
+              'Attachments',
+              'Sent At',
             ],
           ],
         },
@@ -471,10 +571,10 @@ async function logToSheets({
     console.warn('Header ensure notice:', hErr);
   }
 
-  // Append data row (Col A to K)
+  // Append data row (Col A to O)
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${targetSheet}!A:K`,
+    range: `${targetSheet}!A:O`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: {
@@ -490,6 +590,10 @@ async function logToSheets({
         mobileNumber || '',
         secondaryMobileNumber || '',
         designation || '',
+        subject || '',
+        messageBody || '',
+        attachments || '',
+        sentAt || '',
       ]],
     },
   });

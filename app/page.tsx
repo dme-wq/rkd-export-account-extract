@@ -29,6 +29,10 @@ export type SentRecord = {
   mobileNumber?: string;
   secondaryMobileNumber?: string;
   designation?: string;
+  subject?: string;
+  messageBody?: string;
+  attachments?: string;
+  sentAt?: string;
 };
 
 export default function Home() {
@@ -148,6 +152,7 @@ export default function Home() {
               <div className="mt-4">
                 <ComposeWindow
                   session={session}
+                  existingEmails={records.map((r) => r.emailTo)}
                   onSent={handleEmailSent}
                   onError={(msg) => addToast(msg, 'error')}
                   onClose={() => setActiveView('sent')}
@@ -161,6 +166,7 @@ export default function Home() {
         {isComposeOpen && (
           <ComposeWindow
             session={session}
+            existingEmails={records.map((r) => r.emailTo)}
             isFloating={true}
             onSent={handleEmailSent}
             onError={(msg) => addToast(msg, 'error')}

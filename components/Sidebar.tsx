@@ -78,10 +78,10 @@ export function Sidebar({
             }}
           />
 
-          {/* Sent Log / Leads Sheet items */}
+          {/* Sent Mail */}
           <SidebarNavItem
-            icon={<TableProperties size={18} />}
-            label="Sent & Extracted Leads"
+            icon={<Send size={18} />}
+            label="Sent Mail"
             active={activeView === 'sent'}
             badge={recordCount > 0 ? String(recordCount) : undefined}
             onClick={() => {
@@ -89,35 +89,7 @@ export function Sidebar({
               if (window.innerWidth < 768) onClose();
             }}
           />
-
-          {/* Direct Sheet item */}
-          <a
-            href="https://docs.google.com/spreadsheets/d/1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM/edit"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-4 px-6 py-2.5 rounded-r-full text-sm font-medium text-[#444746] hover:bg-[#eaf1fb] transition-colors"
-          >
-            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none">
-              <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z" fill="#0F9D58"/>
-              <path d="M17 13H7v-2h10v2zm0-4H7V7h10v2zm0 8H7v-2h10v2z" fill="#ffffff"/>
-            </svg>
-            <span className="flex-1 text-left text-xs font-semibold text-[#1e8e3e]">Live Sheet</span>
-            <ExternalLink size={12} className="text-[#747775]" />
-          </a>
         </nav>
-
-        {/* Bottom Workspace Card */}
-        <div className="p-4 mx-3 mb-4 bg-white rounded-2xl border border-[#e0e2e6] shadow-xs">
-          <div className="flex items-center gap-2 mb-1.5">
-            <ShieldCheck size={16} className="text-[#1e8e3e]" />
-            <span className="text-xs font-semibold text-[#1f1f1f]">RKD Furnishings</span>
-          </div>
-          <p className="text-[11px] text-[#747775] leading-relaxed">
-            Connected to Google Sheet:
-            <br />
-            <span className="font-mono text-[10px] text-[#0b57d0] break-all">1sfIboMW5CY...</span>
-          </p>
-        </div>
       </aside>
     </>
   );
