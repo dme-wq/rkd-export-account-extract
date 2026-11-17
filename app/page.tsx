@@ -92,6 +92,59 @@ export default function Home() {
     }
   }, [session, fetchRecords]);
 
+  // 🔄 Real-time Background Auto-Sync for Incoming Replies
+  useEffect(() => {
+    if (!session || session.error === 'RefreshAccessTokenError') return;
+
+    let isSyncing = false;
+
+    const performAutoSync = async () => {
+      if (isSyncing || document.hidden) return;
+      isSyncing = true;
+      try {
+        const res = await fetch('/api/sync-replies?quick=true', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.updatedCount > 0) {
+            await fetchRecords();
+            const emails = (data.updatedLeads || []).map((l: any) => l.email).join(', ');
+            addToast(
+              `🔔 New reply received from ${emails || 'lead'}! Details & signature updated in Google Sheet.`,
+              'success'
+            );
+          }
+        }
+      } catch {
+        // Silent fail on background poll
+      } finally {
+        isSyncing = false;
+      }
+    };
+
+    // 1. Check for incoming replies every 10 seconds
+    const intervalId = setInterval(performAutoSync, 10000);
+
+    // 2. Immediate check when tab is focused / switched back to
+    const handleFocus = () => {
+      performAutoSync();
+      fetchRecords();
+    };
+    window.addEventListener('focus', handleFocus);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        performAutoSync();
+        fetchRecords();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [session, fetchRecords, addToast]);
+
   const handleEmailSent = useCallback(() => {
     addToast('Message sent! AI extracted contact details and logged to Google Sheets.', 'success');
     fetchRecords();

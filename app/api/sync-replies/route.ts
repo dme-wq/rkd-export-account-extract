@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
       console.warn('Could not inspect sheet titles:', e);
     }
 
+    const { searchParams } = new URL(req.url);
+    const isQuick = searchParams.get('quick') === 'true';
+
     const sheetData = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${targetSheet}!A:Q`,
@@ -122,6 +125,11 @@ export async function POST(req: NextRequest) {
         newSecondaryMobile = '';
         newDesignation = '';
         rowNeedsUpdate = true;
+      }
+
+      // On quick background auto-sync, skip rows that already have verified signature & details
+      if (isQuick && existingSig && existingSig.trim().length > 10 && !existingSig.includes('💬') && existingCompany) {
+        continue;
       }
 
       // Step A: Locate the exact Gmail Thread for this sent email

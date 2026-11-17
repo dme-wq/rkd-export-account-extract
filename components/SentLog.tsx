@@ -88,11 +88,13 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
       return;
     }
 
-    const fetchThread = async () => {
-      setLoadingThread(true);
-      setShowReplyComposer(false);
-      setReplyText('');
-      setReplySentSuccess(false);
+    const fetchThread = async (silent = false) => {
+      if (!silent) {
+        setLoadingThread(true);
+        setShowReplyComposer(false);
+        setReplyText('');
+        setReplySentSuccess(false);
+      }
 
       try {
         const queryParams = new URLSearchParams({
@@ -114,11 +116,20 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
       } catch (err) {
         console.warn('Error fetching conversation thread:', err);
       } finally {
-        setLoadingThread(false);
+        if (!silent) setLoadingThread(false);
       }
     };
 
     fetchThread();
+
+    // Live real-time thread updater while modal is open
+    const pollInterval = setInterval(() => {
+      if (!document.hidden) {
+        fetchThread(true);
+      }
+    }, 6000);
+
+    return () => clearInterval(pollInterval);
   }, [selectedEmail]);
 
   const handleSyncReplies = async () => {
