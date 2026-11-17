@@ -38,40 +38,17 @@ export function isSenderSignature({
     if (prefix.length >= 5 && lower.includes(prefix)) return true;
   }
 
-  // 2. Check sender organization / company identifiers
+  // 2. Check sender organization / company identifiers (Original email footer quoted)
   const senderOrgKeywords = [
     'rkd furnishings',
     'rkd-furnishings',
-    'rkd.in',
+    'it | rkd furnishings',
     'www.rkd.in',
-    '@qkd.',
-    '@rkd.',
-    'it | rkd',
-    'rk dyeing',
-    'rkdyeing',
+    'rkd.in',
   ];
   for (const kw of senderOrgKeywords) {
     if (lower.includes(kw)) return true;
   }
-
-  // 3. Check sender's known phone numbers
-  const senderPhones = [
-    '9882830548',
-    '98828 30548',
-    '7018218843',
-    '70182 18843',
-  ];
-  for (const ph of senderPhones) {
-    const digitsOnly = ph.replace(/\s+/g, '');
-    if (lower.includes(digitsOnly) || lower.includes(ph)) return true;
-  }
-
-  // 4. Check sender's name
-  if (senderName && senderName.trim().length > 2) {
-    const cleanName = senderName.toLowerCase().trim();
-    if (lower.includes(cleanName)) return true;
-  }
-  if (lower.includes('lucky saini')) return true;
 
   return false;
 }
@@ -143,3 +120,4 @@ export function sanitizeRecipientData<T extends ContactDetails>(
 
   return cleaned;
 }
+

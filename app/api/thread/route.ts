@@ -31,13 +31,14 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const emailParam = searchParams.get('email');
     const threadIdParam = searchParams.get('threadId');
+    const mailIdParam = searchParams.get('mailId');
+    const subjectParam = searchParams.get('subject');
 
-    if (!emailParam && !threadIdParam) {
-      return NextResponse.json({ error: 'Either email or threadId parameter is required' }, { status: 400 });
+    if (!emailParam && !threadIdParam && !mailIdParam) {
+      return NextResponse.json({ error: 'Email, mailId or threadId parameter is required' }, { status: 400 });
     }
 
     const oauth2Client = getGoogleOAuth2Client(session);
-
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const userEmail = (session.user?.email || '').toLowerCase().trim();
     const targetEmail = (emailParam || '').toLowerCase().trim();
@@ -45,7 +46,23 @@ export async function GET(req: NextRequest) {
     const threadMessages: ThreadMessage[] = [];
     let activeThreadId = threadIdParam || '';
 
-    // Strategy A: If threadId is provided, get the full thread
+    // Strategy 1: If mailId (from Column Q) is provided, get threadId of this exact email
+    if (mailIdParam && !activeThreadId) {
+      try {
+        const msgRes = await gmail.users.messages.get({
+          userId: 'me',
+          id: mailIdParam,
+          format: 'minimal',
+        });
+        if (msgRes.data.threadId) {
+          activeThreadId = msgRes.data.threadId;
+        }
+      } catch (mErr) {
+        console.warn('Could not find threadId by mailId:', mErr);
+      }
+    }
+
+    // Strategy 2: If we have activeThreadId, fetch ONLY messages in this exact thread
     if (activeThreadId) {
       try {
         const threadRes = await gmail.users.threads.get({
@@ -55,52 +72,58 @@ export async function GET(req: NextRequest) {
         });
 
         const msgs = threadRes.data.messages || [];
-        for (const m of msgs) {
+        msgs.sort((a, b) => parseInt(a.internalDate || '0') - parseInt(b.internalDate || '0'));
+
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i];
           if (!m.id) continue;
-          const parsed = parseGmailMessage(m, userEmail);
+          const parsed = parseGmailMessage(m, userEmail, targetEmail, i);
           threadMessages.push(parsed);
         }
       } catch (tErr) {
-        console.warn('Could not fetch thread by ID, falling back to email search:', tErr);
+        console.warn('Could not fetch thread by ID:', tErr);
       }
     }
 
-    // Strategy B: If no threadId or thread was empty, search by email
-    if (threadMessages.length === 0 && targetEmail) {
+    // Strategy 3: Fallback ONLY for legacy rows without mailId - search strictly by subject + recipient
+    // (STRICT: Never search general mailbox without subject to avoid random older emails!)
+    if (threadMessages.length === 0 && subjectParam && targetEmail) {
       try {
+        const cleanSubject = subjectParam.replace(/["\\]/g, '').trim();
         const listRes = await gmail.users.messages.list({
           userId: 'me',
-          q: targetEmail,
-          maxResults: 10,
+          q: `subject:"${cleanSubject}" to:${targetEmail}`,
+          maxResults: 5,
         });
 
         const msgRefs = listRes.data.messages || [];
-        for (const ref of msgRefs) {
-          if (!ref.id) continue;
-          try {
-            const m = await gmail.users.messages.get({
-              userId: 'me',
-              id: ref.id,
-              format: 'full',
-            });
-            if (m.data.threadId && !activeThreadId) {
-              activeThreadId = m.data.threadId;
-            }
-            const parsed = parseGmailMessage(m.data, userEmail);
+        if (msgRefs.length > 0 && msgRefs[0].threadId) {
+          activeThreadId = msgRefs[0].threadId;
+          const threadRes = await gmail.users.threads.get({
+            userId: 'me',
+            id: activeThreadId,
+            format: 'full',
+          });
+
+          const msgs = threadRes.data.messages || [];
+          msgs.sort((a, b) => parseInt(a.internalDate || '0') - parseInt(b.internalDate || '0'));
+
+          for (let i = 0; i < msgs.length; i++) {
+            const m = msgs[i];
+            if (!m.id) continue;
+            const parsed = parseGmailMessage(m, userEmail, targetEmail, i);
             threadMessages.push(parsed);
-          } catch {
-            // Ignore single message error
           }
         }
       } catch (searchErr) {
-        console.warn('Could not search messages by email:', searchErr);
+        console.warn('Could not search thread by subject:', searchErr);
       }
     }
 
     // Sort chronologically (oldest first)
     threadMessages.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Identify incoming replies from the recipient
+    // Identify incoming replies from the recipient (messages that are not the original sent email)
     const repliesFromLead = threadMessages.filter((m) => !m.isFromMe);
     const hasReply = repliesFromLead.length > 0;
     const latestReply = hasReply ? repliesFromLead[repliesFromLead.length - 1] : null;
@@ -121,7 +144,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-function parseGmailMessage(m: any, userEmail: string): ThreadMessage {
+function parseGmailMessage(m: any, userEmail: string, targetEmail: string, indexInThread: number): ThreadMessage {
   const headers = m.payload?.headers || [];
   let from = '';
   let to = '';
@@ -139,7 +162,23 @@ function parseGmailMessage(m: any, userEmail: string): ThreadMessage {
   }
 
   const fromLower = from.toLowerCase();
-  const isFromMe = Boolean(userEmail && fromLower.includes(userEmail));
+  
+  // First message in thread is always the sent email from this WebApp
+  // Subsequent messages (index > 0) in the thread are replies
+  let isFromMe = false;
+  if (indexInThread === 0) {
+    isFromMe = true;
+  } else {
+    // If sent to a third-party lead, check if from contains userEmail
+    if (targetEmail !== userEmail) {
+      isFromMe = Boolean(userEmail && fromLower.includes(userEmail));
+    } else {
+      // In self-testing (where user sent email to their own address),
+      // message 0 is Sent, message 1+ is Reply!
+      isFromMe = false;
+    }
+  }
+
   const rawBody = extractBodyFromMessage(m);
   let signature: string | undefined = undefined;
   if (!isFromMe) {
@@ -165,4 +204,3 @@ function parseGmailMessage(m: any, userEmail: string): ThreadMessage {
     messageIdHeader,
   };
 }
-

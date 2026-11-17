@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1. Recipient Signature & Company Extraction (STRICT: NEVER log sender's signature or details into sheet!)
+    // 1. Recipient Signature & Company Extraction (Outbound mail: Recipient signature is empty until recipient replies!)
     let recipientSignature = '';
     let aiExtracted: ExtractedSignatureData = {
       companyName: '',
@@ -137,71 +137,18 @@ export async function POST(req: NextRequest) {
     };
 
     const userName = (session.user?.name || '').trim();
-    const isSelfEmail = primaryRecipient.toLowerCase().trim() === userEmail.toLowerCase().trim();
 
-    // Check if recipient has ever sent us an incoming email in Gmail history
-    // (Excluding messages sent by me, and skipped if self-email!)
-    if (!isSelfEmail) {
-      try {
-        const incomingListRes = await gmail.users.messages.list({
-          userId: 'me',
-          q: `from:${primaryRecipient} -from:me`,
-          maxResults: 3,
-        });
-
-        const incomingMessages = incomingListRes.data.messages || [];
-        for (const msgRef of incomingMessages) {
-          if (!msgRef.id) continue;
-          const fullMsg = await gmail.users.messages.get({
-            userId: 'me',
-            id: msgRef.id,
-            format: 'full',
-          });
-
-          // Confirm the message is really from the recipient
-          const headers = fullMsg.data.payload?.headers || [];
-          const fromHeader = headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
-          if (!fromHeader.toLowerCase().includes(primaryRecipient.toLowerCase())) {
-            continue;
-          }
-
-          const bodyText = extractBodyFromMessage(fullMsg.data);
-          const sig = extractSignatureFromReply(bodyText);
-
-          // Verify this signature does NOT belong to the sender
-          if (
-            sig &&
-            sig.trim() &&
-            !isSenderSignature({
-              signatureText: sig,
-              senderEmail: userEmail,
-              senderName: userName,
-            })
-          ) {
-            recipientSignature = sig;
-            aiExtracted = await extractDetailsFromSignature(sig, primaryRecipient);
-            break;
-          }
-        }
-      } catch (msgErr) {
-        console.warn('Could not check incoming messages for recipient:', msgErr);
+    // Auto-extract Company Name from recipient email domain if it's a corporate email (e.g. name@rkdyeing.com -> RK Dyeing)
+    try {
+      const domainExtract = await extractCompanyFromEmailDomain(primaryRecipient);
+      if (domainExtract.companyName) {
+        aiExtracted.companyName = domainExtract.companyName;
       }
+    } catch (domErr) {
+      console.warn('Domain company extraction notice:', domErr);
     }
 
-    // If company name not found yet, auto-extract from recipient email domain!
-    // (e.g. lucky.saini@rkdyeing.com -> RK Dyeing, but only for legitimate corporate domains, NOT free providers like gmail.com!)
-    if (!aiExtracted.companyName || !aiExtracted.companyName.trim()) {
-      try {
-        const domainExtract = await extractCompanyFromEmailDomain(primaryRecipient);
-        if (domainExtract.companyName) {
-          aiExtracted.companyName = domainExtract.companyName;
-        }
-      } catch (domErr) {
-        console.warn('Domain company extraction notice:', domErr);
-      }
-    }
-
-    // Strictly sanitize recipient data to prevent ANY sender data leaking to the sheet:
+    // Strictly sanitize recipient data to prevent ANY sender company leaking to the sheet:
     const sanitized = sanitizeRecipientData(
       {
         signature: recipientSignature,
@@ -318,10 +265,15 @@ export async function POST(req: NextRequest) {
       ? attachments.map((a: EmailAttachmentPayload) => `${a.filename} (${formatAttachmentSize(a.size)})`).join(', ')
       : '';
 
-    const sentAt = new Date().toLocaleString('en-IN', {
+    const now = new Date();
+    const sentAt = now.toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
-      dateStyle: 'medium',
-      timeStyle: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
     });
 
     try {
@@ -342,6 +294,8 @@ export async function POST(req: NextRequest) {
         messageBody: cleanMessageText,
         attachments: attachmentSummary,
         sentAt,
+        senderEmail: userEmail,
+        messageId: messageId || '',
       });
       sheetsSuccess = true;
     } catch (sheetErr: unknown) {
@@ -571,6 +525,8 @@ async function logToSheets({
   messageBody,
   attachments,
   sentAt,
+  senderEmail,
+  messageId,
 }: {
   oauth2Client: InstanceType<typeof google.auth.OAuth2>;
   firstName: string;
@@ -588,6 +544,8 @@ async function logToSheets({
   messageBody: string;
   attachments: string;
   sentAt: string;
+  senderEmail: string;
+  messageId: string;
 }) {
   const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
   const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
@@ -609,18 +567,18 @@ async function logToSheets({
     console.warn('Could not inspect sheet metadata, falling back to Gmail:', err);
   }
 
-  // Ensure header row exists up to Column O (15 columns)
+  // Ensure header row exists up to Column Q (17 columns)
   try {
     const headerCheck = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${targetSheet}!A1:O1`,
+      range: `${targetSheet}!A1:Q1`,
     });
 
     const headerValues = headerCheck.data.values?.[0];
-    if (!headerValues || headerValues.length < 15) {
+    if (!headerValues || headerValues.length < 17) {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `${targetSheet}!A1:O1`,
+        range: `${targetSheet}!A1:Q1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [
@@ -640,6 +598,8 @@ async function logToSheets({
               'Message',
               'Attachments',
               'Sent At',
+              'Email ID',
+              'Mail ID',
             ],
           ],
         },
@@ -649,10 +609,10 @@ async function logToSheets({
     console.warn('Header ensure notice:', hErr);
   }
 
-  // Append data row (Col A to O)
+  // Append data row (Col A to Q)
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${targetSheet}!A:O`,
+    range: `${targetSheet}!A:Q`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: {
@@ -671,7 +631,9 @@ async function logToSheets({
         subject || '',
         messageBody || '',
         attachments || '',
-        sentAt || '',
+        `'${sentAt}`,
+        senderEmail || '',
+        messageId || '',
       ]],
     },
   });

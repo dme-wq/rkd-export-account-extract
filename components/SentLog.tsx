@@ -33,6 +33,28 @@ interface SentLogProps {
   onUseTemplate?: (template: { subject: string; body: string }) => void;
 }
 
+function formatSentDate(val?: string): string {
+  if (!val) return 'Recently';
+  const clean = val.replace(/^'/, '').trim();
+  const num = parseFloat(clean);
+  if (!isNaN(num) && num > 30000 && num < 70000 && String(num) === clean) {
+    const ms = (num - 25569) * 86400 * 1000;
+    const d = new Date(ms);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
+  }
+  return clean;
+}
+
 export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemplate }: SentLogProps) {
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'replied' | 'pending'>('all');
@@ -73,7 +95,12 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
       setReplySentSuccess(false);
 
       try {
-        const res = await fetch(`/api/thread?email=${encodeURIComponent(selectedEmail.emailTo)}`);
+        const queryParams = new URLSearchParams({
+          email: selectedEmail.emailTo,
+          ...(selectedEmail.mailId ? { mailId: selectedEmail.mailId } : {}),
+          ...(selectedEmail.subject ? { subject: selectedEmail.subject } : {}),
+        });
+        const res = await fetch(`/api/thread?${queryParams.toString()}`);
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.messages) {
@@ -503,7 +530,7 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
 
                       {/* Sent Date */}
                       <td className="py-3 px-3 text-[#747775] text-[11px] whitespace-nowrap">
-                        {rec.sentAt || 'Recently'}
+                        {formatSentDate(rec.sentAt)}
                       </td>
 
                       {/* Action */}
@@ -784,7 +811,7 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
                         <span className="px-2 py-0.5 rounded-full font-semibold text-[10px] bg-[#eaf1fb] text-[#0b57d0]">
                           You (Sent)
                         </span>
-                        <span className="text-[11px] text-[#747775]">{selectedEmail.sentAt || 'Sent'}</span>
+                        <span className="text-[11px] text-[#747775]">{formatSentDate(selectedEmail.sentAt)}</span>
                       </div>
                       {selectedEmail.messageBody || 'No message content stored.'}
                     </div>

@@ -34,6 +34,8 @@ export type SentRecord = {
   messageBody?: string;
   attachments?: string;
   sentAt?: string;
+  senderEmail?: string;
+  mailId?: string;
 };
 
 export default function Home() {
