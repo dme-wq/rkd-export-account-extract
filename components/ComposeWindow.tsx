@@ -8,10 +8,17 @@ import {
   Paperclip, Link2, Smile, Image as ImageIcon, Trash2,
   Lock, PenTool, MoreVertical, Calendar, Bold, Italic, Underline,
   AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Quote,
-  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2, AlertOctagon, CopyPlus
+  Sparkles, Check, UserCheck, Loader2, FileText, AlertTriangle, Globe, Building2, AlertOctagon, CopyPlus, Plus
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { extractNameFromEmail } from '@/lib/nameExtractor';
+import {
+  SignatureModal,
+  UserSignature,
+  DEFAULT_RKD_SIGNATURE,
+  generateSignatureHtml,
+  generateSignatureText,
+} from './SignatureModal';
 
 interface AttachedFile {
   id: string;
@@ -66,10 +73,51 @@ export function ComposeWindow({
   const [isReadingFiles, setIsReadingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Signature
-  const defaultSignature = `Lucky Saini\nData Management Expert\nIT | RKD Furnishings Pvt Ltd\n+91 98828 30548 | +91 70182 18843\nwww.rkd.in`;
-  const [signature, setSignature] = useState(defaultSignature);
+  // Signature Management
   const [includeSignature, setIncludeSignature] = useState(true);
+  const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
+  const [showSignatureMenu, setShowSignatureMenu] = useState(false);
+  const [signaturesList, setSignaturesList] = useState<UserSignature[]>([DEFAULT_RKD_SIGNATURE]);
+  const [activeSignatureId, setActiveSignatureId] = useState<string>(DEFAULT_RKD_SIGNATURE.id);
+
+  const userEmailKey = session?.user?.email || 'default';
+
+  // Load signatures from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`rkd_signatures_${userEmailKey}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setSignaturesList(parsed);
+          setActiveSignatureId(parsed[0].id);
+        }
+      } else if (session?.user?.name) {
+        const personalized: UserSignature = {
+          ...DEFAULT_RKD_SIGNATURE,
+          fullName: session.user.name,
+        };
+        setSignaturesList([personalized]);
+      }
+    } catch (e) {
+      console.warn('Could not read saved signatures:', e);
+    }
+  }, [userEmailKey, session?.user?.name]);
+
+  const handleSaveSignatures = (updatedList: UserSignature[], newActiveId?: string) => {
+    setSignaturesList(updatedList);
+    if (newActiveId) setActiveSignatureId(newActiveId);
+    try {
+      localStorage.setItem(`rkd_signatures_${userEmailKey}`, JSON.stringify(updatedList));
+    } catch (e) {
+      console.warn('Could not persist signatures:', e);
+    }
+  };
+
+  const activeSignature =
+    signaturesList.find((s) => s.id === activeSignatureId) ||
+    signaturesList[0] ||
+    DEFAULT_RKD_SIGNATURE;
 
   // Window State
   const [isMinimized, setIsMinimized] = useState(false);
@@ -320,17 +368,14 @@ export function ComposeWindow({
 
     setSending(true);
     try {
-      const formattedSignatureHtml = includeSignature && signature ? `
-        <div style="margin-top: 24px; padding-top: 12px; border-top: 1px solid #dadce0; font-family: Roboto, sans-serif; font-size: 13px; color: #5f6368; line-height: 1.6;">
-          --<br/>
-          <strong style="color: #202124; font-size: 15px;">Lucky Saini</strong><br/>
-          <span>Data Management Expert</span><br/>
-          <span style="color: #0b57d0; font-weight: 500;">IT | RKD Furnishings Pvt Ltd</span>
-          <div style="height: 2px; width: 140px; background-color: #c8102e; margin: 8px 0;"></div>
-          <span>📞 +91 98828 30548 | +91 70182 18843</span><br/>
-          <span>🔗 <a href="https://www.rkd.in" target="_blank" style="color: #0b57d0; text-decoration: none;">www.rkd.in</a></span>
-        </div>
-      ` : '';
+      const formattedSignatureHtml =
+        includeSignature && activeSignature
+          ? generateSignatureHtml(activeSignature)
+          : '';
+      const signaturePlain =
+        includeSignature && activeSignature
+          ? generateSignatureText(activeSignature)
+          : '';
 
       const payload = {
         to: finalTo,
@@ -338,7 +383,7 @@ export function ComposeWindow({
         bcc: finalBcc.length > 0 ? finalBcc : undefined,
         subject: subject.trim(),
         body: messageHtml + formattedSignatureHtml,
-        signature: includeSignature ? signature : '',
+        signature: signaturePlain,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         attachments: attachments.map((a) => ({
@@ -757,15 +802,53 @@ export function ComposeWindow({
                 />
 
                 {/* Signature Preview */}
-                {includeSignature && (
-                  <div className="mt-6 pt-4 border-t border-[#dadce0] text-xs text-[#5f6368] select-none font-sans">
-                    <div className="text-[13px] text-[#444746] mb-1">--</div>
-                    <div className="font-bold text-[15px] text-[#1f1f1f] leading-snug">Lucky Saini</div>
-                    <div className="text-xs text-[#444746]">Data Management Expert</div>
-                    <div className="text-xs text-[#0b57d0] font-medium">IT | RKD Furnishings Pvt Ltd</div>
-                    <div className="h-0.5 w-32 bg-[#c8102e] my-2"></div>
-                    <div className="text-xs text-[#444746]">📞 +91 98828 30548 | +91 70182 18843</div>
-                    <div className="text-xs text-[#0b57d0]">🔗 www.rkd.in</div>
+                {includeSignature && activeSignature && (
+                  <div className="mt-6 pt-4 border-t border-[#dadce0] text-xs text-[#5f6368] select-none font-sans relative group">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="text-[13px] text-[#444746]">--</div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSignatureModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#0b57d0] border border-blue-200 text-[11px] font-medium transition-all shadow-2xs cursor-pointer"
+                        title="Edit or change this signature"
+                      >
+                        <PenTool size={11} />
+                        <span>Edit Signature</span>
+                      </button>
+                    </div>
+
+                    {activeSignature.isCustomMode ? (
+                      <div
+                        className="whitespace-pre-wrap text-[#1f1f1f]"
+                        dangerouslySetInnerHTML={{
+                          __html: activeSignature.customHtml?.replace(/\n/g, '<br/>') || '',
+                        }}
+                      />
+                    ) : (
+                      <>
+                        {activeSignature.fullName && (
+                          <div className="font-bold text-[15px] text-[#1f1f1f] leading-snug">
+                            {activeSignature.fullName}
+                          </div>
+                        )}
+                        {activeSignature.designation && (
+                          <div className="text-xs text-[#444746]">{activeSignature.designation}</div>
+                        )}
+                        {activeSignature.company && (
+                          <div className="text-xs text-[#0b57d0] font-medium">{activeSignature.company}</div>
+                        )}
+                        <div
+                          className="h-0.5 w-32 my-2"
+                          style={{ backgroundColor: activeSignature.accentColor || '#c8102e' }}
+                        />
+                        {activeSignature.phones && (
+                          <div className="text-xs text-[#444746]">📞 {activeSignature.phones}</div>
+                        )}
+                        {activeSignature.website && (
+                          <div className="text-xs text-[#0b57d0]">🔗 {activeSignature.website}</div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1054,18 +1137,90 @@ export function ComposeWindow({
                     )}
                   </div>
 
-                  {/* Signature Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setIncludeSignature(!includeSignature)}
-                    className={clsx(
-                      'p-2 rounded-full hover:bg-black/5',
-                      includeSignature && 'text-[#0b57d0] bg-[#eaf1fb]'
+                  {/* Signature Toggle & Manager */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowSignatureMenu(!showSignatureMenu)}
+                      className={clsx(
+                        'p-2 rounded-full hover:bg-black/5 flex items-center gap-0.5 transition-colors cursor-pointer',
+                        includeSignature && 'text-[#0b57d0] bg-[#eaf1fb]'
+                      )}
+                      title="Insert or Manage Signature"
+                    >
+                      <PenTool size={16} />
+                      <ChevronDown size={11} className="-ml-0.5" />
+                    </button>
+
+                    {showSignatureMenu && (
+                      <div className="absolute bottom-full left-0 mb-2 w-64 bg-white rounded-2xl shadow-xl border border-[#dadce0] p-2 z-50 animate-slide-up-fade font-sans text-xs">
+                        <div className="px-3 py-1.5 font-semibold text-[#444746] border-b border-[#f1f3f4] flex items-center justify-between">
+                          <span>Signature</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSignatureMenu(false);
+                              setIsSignatureModalOpen(true);
+                            }}
+                            className="text-[#0b57d0] hover:underline flex items-center gap-1 font-medium"
+                          >
+                            <Plus size={12} />
+                            <span>Add / Edit</span>
+                          </button>
+                        </div>
+
+                        {/* Toggle No Signature */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIncludeSignature(false);
+                            setShowSignatureMenu(false);
+                          }}
+                          className={clsx(
+                            'w-full text-left px-3 py-2 rounded-xl flex items-center justify-between hover:bg-[#f8fafd] transition-colors cursor-pointer',
+                            !includeSignature && 'bg-[#eaf1fb] font-semibold text-[#0b57d0]'
+                          )}
+                        >
+                          <span>No signature</span>
+                          {!includeSignature && <Check size={14} />}
+                        </button>
+
+                        {/* List Saved Signatures */}
+                        {signaturesList.map((sig) => (
+                          <button
+                            key={sig.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveSignatureId(sig.id);
+                              setIncludeSignature(true);
+                              setShowSignatureMenu(false);
+                            }}
+                            className={clsx(
+                              'w-full text-left px-3 py-2 rounded-xl flex items-center justify-between hover:bg-[#f8fafd] transition-colors cursor-pointer',
+                              includeSignature && activeSignatureId === sig.id && 'bg-[#eaf1fb] font-semibold text-[#0b57d0]'
+                            )}
+                          >
+                            <span className="truncate">{sig.name || sig.fullName || 'Signature'}</span>
+                            {includeSignature && activeSignatureId === sig.id && <Check size={14} />}
+                          </button>
+                        ))}
+
+                        <div className="pt-1 mt-1 border-t border-[#f1f3f4]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSignatureMenu(false);
+                              setIsSignatureModalOpen(true);
+                            }}
+                            className="w-full text-left px-3 py-2 rounded-xl text-[#0b57d0] hover:bg-[#eaf1fb] flex items-center gap-2 font-medium transition-colors cursor-pointer"
+                          >
+                            <PenTool size={13} />
+                            <span>Manage Signatures...</span>
+                          </button>
+                        </div>
+                      </div>
                     )}
-                    title="Insert signature"
-                  >
-                    <PenTool size={16} />
-                  </button>
+                  </div>
 
                   {/* Confidential mode */}
                   <button
@@ -1247,6 +1402,15 @@ export function ComposeWindow({
           </div>
         </div>
       )}
+
+      {/* Modern Signature Management Modal */}
+      <SignatureModal
+        isOpen={isSignatureModalOpen}
+        onClose={() => setIsSignatureModalOpen(false)}
+        signatures={signaturesList}
+        activeSignatureId={activeSignatureId}
+        onSaveSignatures={handleSaveSignatures}
+      />
     </>
   );
 }
