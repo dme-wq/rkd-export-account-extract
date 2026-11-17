@@ -517,7 +517,7 @@ export function ComposeWindow({
                       }
                     }
                   }}
-                  placeholder={toChips.length === 0 ? 'Recipients (e.g. luckyknhn@gmail.com)' : ''}
+                  placeholder={toChips.length === 0 ? 'Recipients (e.g. admin@rkd.in)' : ''}
                   className="flex-1 min-w-[140px] bg-transparent text-sm text-[#1f1f1f] outline-none border-none py-1 placeholder-[#747775]"
                 />
               </div>
