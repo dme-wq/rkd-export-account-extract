@@ -741,9 +741,6 @@ export function ComposeWindow({
                     ✓ Verified Google Profile
                   </span>
                 )}
-                <span className="text-[11px] text-[#5f6368] hidden sm:inline">
-                  Sheet: <strong>Gmail!A:K</strong>
-                </span>
               </div>
             </div>
 
