@@ -94,14 +94,23 @@ export async function POST(req: NextRequest) {
       try {
         const existingSheetData = await sheets.spreadsheets.values.get({
           spreadsheetId,
-          range: `${targetSheet}!C2:C`,
+          range: `${targetSheet}!C2:P`,
         });
         const existingRows = existingSheetData.data.values || [];
         const existingEmailSet = new Set<string>();
+        const currentUser = userEmail.toLowerCase().trim();
 
         for (const row of existingRows) {
-          if (row[0]) {
-            const splitEmails = String(row[0]).split(/[,;\s]+/);
+          const recipientCol = row[0]; // Col C
+          const senderCol = (row[13] || '').trim().toLowerCase(); // Col P (index 13 in C:P)
+
+          // Only check duplicate if it was previously sent by THIS user
+          const isSentByThisUser = senderCol
+            ? senderCol === currentUser
+            : currentUser === 'dme@rkd.in';
+
+          if (isSentByThisUser && recipientCol) {
+            const splitEmails = String(recipientCol).split(/[,;\s]+/);
             for (const em of splitEmails) {
               const clean = em.trim().toLowerCase();
               if (clean) existingEmailSet.add(clean);

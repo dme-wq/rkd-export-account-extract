@@ -30,8 +30,19 @@ export async function GET(req: NextRequest) {
     // Skip header row
     const dataRows = rows.slice(1);
     
+    // Filter strictly by currently logged-in user (Sender Email in Column P / index 15)
+    const currentUserEmail = (session.user?.email || '').trim().toLowerCase();
+    const userRows = dataRows.filter((row) => {
+      const senderEmail = (row[15] || '').trim().toLowerCase();
+      if (senderEmail) {
+        return senderEmail === currentUserEmail;
+      }
+      // For legacy rows without Column P, only show to dme@rkd.in
+      return currentUserEmail === 'dme@rkd.in';
+    });
+
     // Reverse for newest first
-    const reversed = [...dataRows].reverse();
+    const reversed = [...userRows].reverse();
     
     // Paginate
     const start = (page - 1) * limit;
@@ -61,10 +72,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       records,
-      total: dataRows.length,
+      total: userRows.length,
       page,
       limit,
-      totalPages: Math.ceil(dataRows.length / limit),
+      totalPages: Math.ceil(userRows.length / limit),
     });
   } catch (error: unknown) {
     console.error('Get records error:', error);

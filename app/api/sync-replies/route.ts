@@ -90,6 +90,14 @@ export async function POST(req: NextRequest) {
       const senderEmailCol = row[15] || ''; // Col P
       const mailIdCol = row[16] || '';      // Col Q
 
+      // Strictly isolate: Only scan rows that were sent by the currently logged-in user!
+      const senderClean = (senderEmailCol || '').trim().toLowerCase();
+      if (senderClean) {
+        if (senderClean !== userEmail.toLowerCase()) continue;
+      } else if (userEmail.toLowerCase() !== 'dme@rkd.in') {
+        continue;
+      }
+
       if (!emailCol || !emailCol.includes('@')) continue;
 
       // Extract primary email (if comma-separated)
