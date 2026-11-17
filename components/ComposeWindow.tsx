@@ -303,7 +303,7 @@ export function ComposeWindow({
     // Duplicate Check: Prevent sending if already mailed
     const dupInFinal = finalTo.find((em) => existingEmailSet.has(em.toLowerCase().trim()));
     if (dupInFinal) {
-      onError(`Aapne is email address (${dupInFinal}) par already mail kar diya hai! Duplicate mail bhejna allowed nahi hai.`);
+      onError(`You have already sent an email to (${dupInFinal})! Sending duplicate emails is not allowed.`);
       return;
     }
 
@@ -550,7 +550,7 @@ export function ComposeWindow({
               <div className="mx-4 my-1.5 px-3.5 py-2.5 rounded-xl bg-[#fce8e6] border border-[#f5c2c7] text-[#c5221f] flex items-center gap-2 text-xs font-medium animate-pulse">
                 <AlertOctagon size={16} className="text-[#c5221f] flex-shrink-0" />
                 <span>
-                  <strong>Already Sent Error:</strong> Aapne is email ID (<strong>{duplicateEmail}</strong>) par already mail kar diya hai! Duplicate mail bhejna allowed nahi hai.
+                  <strong>Already Sent:</strong> You have already sent an email to <strong>{duplicateEmail}</strong>! Duplicate emails are not allowed.
                 </span>
               </div>
             )}
@@ -951,7 +951,7 @@ export function ComposeWindow({
                         ? 'bg-[#80868b] text-white cursor-not-allowed opacity-80'
                         : 'bg-[#0b57d0] hover:bg-[#105dc1] active:bg-[#0842a0] text-white cursor-pointer disabled:opacity-50'
                     )}
-                    title={duplicateEmail ? `Duplicate Error: Is email (${duplicateEmail}) par already mail bhej diya hai!` : 'Send email'}
+                    title={duplicateEmail ? `Duplicate Warning: You have already emailed (${duplicateEmail})!` : 'Send email'}
                   >
                     {sending ? (
                       <>

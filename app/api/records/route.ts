@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Gmail!A:Q',
+      range: 'Gmail!A:R',
     });
 
     const rows = response.data.values || [];
@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
       sentAt: row[14] || '',
       senderEmail: row[15] || '',
       mailId: row[16] || '',
+      attachmentLink: row[17] || '',
     }));
 
     return NextResponse.json({

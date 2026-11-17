@@ -5,7 +5,7 @@ import {
   RefreshCw, Search, Mail, Send, ChevronLeft, ChevronRight,
   CheckCircle2, Copy, Check, Sparkles, Phone, Building2,
   Paperclip, Eye, X, CornerUpLeft, MessageSquare, Clock,
-  UserCheck, AlertCircle, Loader2, CopyPlus
+  UserCheck, AlertCircle, Loader2, CopyPlus, ExternalLink, Download
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { clsx } from 'clsx';
@@ -31,6 +31,33 @@ interface SentLogProps {
   onRefresh: () => void;
   onComposeClick: () => void;
   onUseTemplate?: (template: { subject: string; body: string }) => void;
+}
+
+export interface ParsedAttachment {
+  name: string;
+  url: string;
+  isDrive: boolean;
+}
+
+export function parseAttachmentsList(attachmentsStr?: string, driveLinksStr?: string, mailId?: string): ParsedAttachment[] {
+  if (!attachmentsStr || !attachmentsStr.trim()) return [];
+
+  const rawFiles = attachmentsStr.split(',').map((s) => s.trim()).filter(Boolean);
+  const driveLinks = (driveLinksStr || '').split(',').map((s) => s.trim()).filter(Boolean);
+
+  return rawFiles.map((fileStr, index) => {
+    const driveLink = driveLinks[index] || (driveLinks.length === 1 ? driveLinks[0] : '');
+    const fallbackUrl = mailId
+      ? `/api/download-attachment?mailId=${encodeURIComponent(mailId)}&filename=${encodeURIComponent(fileStr)}`
+      : '';
+    const openUrl = driveLink || fallbackUrl;
+
+    return {
+      name: fileStr,
+      url: openUrl,
+      isDrive: Boolean(driveLink),
+    };
+  });
 }
 
 function formatSentDate(val?: string): string {
@@ -493,15 +520,38 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
                       </td>
 
                       {/* Attachments */}
-                      <td className="py-3 px-3 max-w-[140px]">
-                        {rec.attachments ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#f1f3f4] text-[#1f1f1f] border border-[#dadce0] text-[11px] font-medium truncate max-w-[130px]" title={rec.attachments}>
-                            <Paperclip size={11} className="text-[#0b57d0] flex-shrink-0" />
-                            <span className="truncate">{rec.attachments}</span>
-                          </span>
-                        ) : (
-                          <span className="text-[#c4c7cc] italic">—</span>
-                        )}
+                      <td className="py-3 px-3 max-w-[150px]">
+                        {(() => {
+                          const attList = parseAttachmentsList(rec.attachments, rec.attachmentLink, rec.mailId);
+                          if (attList.length === 0) {
+                            return <span className="text-[#c4c7cc] italic">—</span>;
+                          }
+                          const first = attList[0];
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <a
+                                href={first.url || '#'}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  if (!first.url) e.preventDefault();
+                                  e.stopPropagation();
+                                }}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-[#0b57d0] border border-blue-200 hover:bg-blue-100 hover:border-blue-400 text-[11px] font-medium truncate max-w-[140px] transition-colors shadow-2xs group cursor-pointer"
+                                title={`Open: ${first.name}`}
+                              >
+                                <Paperclip size={11} className="text-[#0b57d0] flex-shrink-0" />
+                                <span className="truncate underline decoration-blue-300 underline-offset-2">{first.name}</span>
+                                <ExternalLink size={10} className="text-[#0b57d0] flex-shrink-0 opacity-70 group-hover:opacity-100" />
+                              </a>
+                              {attList.length > 1 && (
+                                <span className="text-[10px] text-[#747775] font-medium pl-1">
+                                  +{attList.length - 1} more
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* CC / BCC */}
@@ -742,13 +792,44 @@ export function SentLog({ records, loading, onRefresh, onComposeClick, onUseTemp
 
               {/* Attachments Section (if any in original email) */}
               {selectedEmail.attachments && (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-semibold text-[#444746] flex items-center gap-1">
-                    <Paperclip size={13} className="text-[#0b57d0]" />
-                    <span>Attachments:</span>
-                  </span>
-                  <div className="bg-[#f8fafd] border border-[#dadce0] rounded-xl p-3 text-xs text-[#1f1f1f]">
-                    {selectedEmail.attachments}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#444746] flex items-center gap-1.5">
+                      <Paperclip size={14} className="text-[#0b57d0]" />
+                      <span>Attachments ({parseAttachmentsList(selectedEmail.attachments, selectedEmail.attachmentLink, selectedEmail.mailId).length})</span>
+                    </span>
+                    {selectedEmail.attachmentLink && (
+                      <span className="text-[11px] text-[#137333] font-medium flex items-center gap-1">
+                        <CheckCircle2 size={12} />
+                        Saved in Google Drive
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {parseAttachmentsList(selectedEmail.attachments, selectedEmail.attachmentLink, selectedEmail.mailId).map((att, idx) => (
+                      <a
+                        key={idx}
+                        href={att.url || '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          if (!att.url) e.preventDefault();
+                        }}
+                        className="flex items-center justify-between p-3 rounded-xl border border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 hover:border-blue-400 transition-all text-xs font-medium text-[#1f1f1f] group shadow-2xs"
+                      >
+                        <div className="flex items-center gap-2 truncate mr-2">
+                          <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 text-[#0b57d0] group-hover:bg-blue-200 transition-colors">
+                            <Paperclip size={14} />
+                          </div>
+                          <span className="truncate text-[#1f1f1f] group-hover:text-[#0b57d0] transition-colors">{att.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0 text-[#0b57d0] text-[11px] font-semibold bg-white px-2.5 py-1 rounded-md border border-blue-200 shadow-2xs group-hover:bg-[#0b57d0] group-hover:text-white transition-all">
+                          <span>{att.isDrive ? 'Open Drive' : 'Download'}</span>
+                          <ExternalLink size={12} />
+                        </div>
+                      </a>
+                    ))}
                   </div>
                 </div>
               )}

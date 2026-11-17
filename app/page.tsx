@@ -36,6 +36,7 @@ export type SentRecord = {
   sentAt?: string;
   senderEmail?: string;
   mailId?: string;
+  attachmentLink?: string;
 };
 
 export default function Home() {

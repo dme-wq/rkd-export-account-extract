@@ -8,6 +8,7 @@ import { extractDetailsFromSignature, ExtractedSignatureData } from '@/lib/aiSig
 import { extractCompanyFromEmailDomain } from '@/lib/companyExtractor';
 import { extractBodyFromMessage, extractSignatureFromReply } from '@/lib/gmailReplyExtractor';
 import { isSenderSignature, sanitizeRecipientData } from '@/lib/signatureValidator';
+import { uploadAttachmentsToDrive } from '@/lib/driveUploader';
 
 export interface EmailAttachmentPayload {
   filename: string;
@@ -112,7 +113,7 @@ export async function POST(req: NextRequest) {
           if (existingEmailSet.has(recipient.toLowerCase().trim())) {
             return NextResponse.json(
               {
-                error: `Aapne is email ID (${recipient}) par already mail bhej diya hai! Duplicate email bhejna allowed nahi hai.`,
+                error: `You have already sent an email to this address (${recipient})! Sending duplicate emails is not allowed.`,
                 duplicateEmail: recipient,
               },
               { status: 400 }
@@ -265,6 +266,22 @@ export async function POST(req: NextRequest) {
       ? attachments.map((a: EmailAttachmentPayload) => `${a.filename} (${formatAttachmentSize(a.size)})`).join(', ')
       : '';
 
+    // Upload attachments to Google Drive folder and get shareable links
+    let attachmentDriveLink = '';
+    if (attachments && attachments.length > 0) {
+      try {
+        const driveLinks = await uploadAttachmentsToDrive({
+          oauth2Client,
+          attachments,
+        });
+        if (driveLinks.length > 0) {
+          attachmentDriveLink = driveLinks.join(', ');
+        }
+      } catch (driveErr) {
+        console.warn('Error uploading attachments to Google Drive:', driveErr);
+      }
+    }
+
     const now = new Date();
     const sentAt = now.toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
@@ -296,6 +313,7 @@ export async function POST(req: NextRequest) {
         sentAt,
         senderEmail: userEmail,
         messageId: messageId || '',
+        attachmentLink: attachmentDriveLink,
       });
       sheetsSuccess = true;
     } catch (sheetErr: unknown) {
@@ -527,6 +545,7 @@ async function logToSheets({
   sentAt,
   senderEmail,
   messageId,
+  attachmentLink,
 }: {
   oauth2Client: InstanceType<typeof google.auth.OAuth2>;
   firstName: string;
@@ -546,6 +565,7 @@ async function logToSheets({
   sentAt: string;
   senderEmail: string;
   messageId: string;
+  attachmentLink?: string;
 }) {
   const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
   const spreadsheetId = process.env.SPREADSHEET_ID || '1sfIboMW5CYT9v8EjbFNyx5gJhgRoXBABMwOMpLQX9XM';
@@ -567,18 +587,18 @@ async function logToSheets({
     console.warn('Could not inspect sheet metadata, falling back to Gmail:', err);
   }
 
-  // Ensure header row exists up to Column Q (17 columns)
+  // Ensure header row exists up to Column R (18 columns)
   try {
     const headerCheck = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${targetSheet}!A1:Q1`,
+      range: `${targetSheet}!A1:R1`,
     });
 
     const headerValues = headerCheck.data.values?.[0];
-    if (!headerValues || headerValues.length < 17) {
+    if (!headerValues || headerValues.length < 18) {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `${targetSheet}!A1:Q1`,
+        range: `${targetSheet}!A1:R1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [
@@ -600,6 +620,7 @@ async function logToSheets({
               'Sent At',
               'Email ID',
               'Mail ID',
+              'Attachement Link',
             ],
           ],
         },
@@ -609,10 +630,10 @@ async function logToSheets({
     console.warn('Header ensure notice:', hErr);
   }
 
-  // Append data row (Col A to Q)
+  // Append data row (Col A to R)
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${targetSheet}!A:Q`,
+    range: `${targetSheet}!A:R`,
     valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS',
     requestBody: {
@@ -634,6 +655,7 @@ async function logToSheets({
         `'${sentAt}`,
         senderEmail || '',
         messageId || '',
+        attachmentLink || '',
       ]],
     },
   });
