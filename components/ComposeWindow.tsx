@@ -750,7 +750,7 @@ export function ComposeWindow({
                       setFirstName(e.target.value);
                       setHasManuallyEditedName(true);
                     }}
-                    placeholder="First Name (Col A)"
+                    placeholder=""
                     className="w-32 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2.5 py-1 text-xs text-[#1f1f1f] font-medium outline-none shadow-2xs"
                     title="First Name (Logs to Google Sheet Column A)"
                   />
@@ -761,7 +761,7 @@ export function ComposeWindow({
                       setLastName(e.target.value);
                       setHasManuallyEditedName(true);
                     }}
-                    placeholder="Last Name (Col B)"
+                    placeholder=""
                     className="w-32 bg-white border border-[#dadce0] focus:border-[#0b57d0] rounded px-2.5 py-1 text-xs text-[#1f1f1f] font-medium outline-none shadow-2xs"
                     title="Last Name (Logs to Google Sheet Column B)"
                   />
